@@ -62,11 +62,37 @@ datos_cartera = {
 }
 
 @st.cache_data(ttl=3600) # Cache para no saturar la API
+@st.cache_data(ttl=3600)
 def cargar_datos():
     tickers = list(datos_cartera.keys())
-    # Descargamos precios de 1 año para los históricos
-    data = yf.download(tickers + ['EURUSD=X', 'EURGBP=X'], period="1y")['Adj Close']
-    return data
+    pares_divisas = ['EURUSD=X', 'EURGBP=X']
+    todos_los_simbolos = tickers + pares_divisas
+    
+    # Creamos un diccionario vacío para guardar los precios
+    precios_dict = {}
+    
+    for simbolo in todos_los_simbolos:
+        try:
+            # Descargamos los datos uno a uno para mayor seguridad
+            ticker_data = yf.download(simbolo, period="1y", progress=False)
+            
+            # Verificamos si tenemos datos
+            if not ticker_data.empty:
+                # Usamos 'Close' o 'Adj Close' dependiendo de lo que devuelva Yahoo
+                columna = 'Adj Close' if 'Adj Close' in ticker_data.columns else 'Close'
+                # Guardamos solo la columna de precios
+                precios_dict[simbolo] = ticker_data[columna]
+        except Exception as e:
+            st.warning(f"No se pudieron cargar datos para {simbolo}")
+            continue
+
+    # Unimos todos los precios en una sola tabla (DataFrame)
+    df_final = pd.DataFrame(precios_dict)
+    
+    # Rellenamos huecos (días festivos donde una bolsa abre y otra no)
+    df_final = df_final.ffill()
+    
+    return df_final
 
 data = cargar_datos()
 hoy = data.index[-1]
@@ -133,3 +159,4 @@ st.dataframe(df.style.format({
     'Invertido': '{:,.2f}'
 
 }), use_container_width=True)
+
