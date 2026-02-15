@@ -1,4 +1,26 @@
 import streamlit as st
+# ... (tus otros imports)
+
+# Verificación segura de secretos
+if "password" not in st.secrets:
+    st.error("Error: No se ha configurado la contraseña en los 'Secrets' de Streamlit.")
+    st.stop()
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    password_usuario = st.text_input("Contraseña de acceso", type="password")
+    if password_usuario == st.secrets["password"]:
+        st.session_state.autenticado = True
+        st.rerun()
+    else:
+        if password_usuario:
+            st.error("Contraseña incorrecta")
+        st.stop()
+
+# --- TODO EL RESTO DEL CÓDIGO DE TU CARTERA ---
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
@@ -120,3 +142,4 @@ if precios_actuales:
             st.write(", ".join(lista_errores))
 else:
     st.error("No se pudieron obtener datos de Yahoo Finance. Reintenta en unos minutos.")
+
