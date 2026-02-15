@@ -1,4 +1,32 @@
 import streamlit as st
+# ... (los demás imports se quedan igual)
+
+# Función para verificar la contraseña
+def check_password():
+    def password_entered():
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # No guardar la contraseña
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.text_input("Introduce la contraseña para ver la cartera", 
+                      type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.text_input("Contraseña incorrecta", 
+                      type="password", on_change=password_entered, key="password")
+        return False
+    else:
+        return True
+
+# --- LÓGICA PRINCIPAL ---
+if check_password():
+    # AQUÍ PEGAS TODO EL RESTO DEL CÓDIGO QUE YA TENÍAS
+    st.title("📊 Control de Cartera Multidivisa")
+    # ... resto del código ...
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
@@ -103,4 +131,5 @@ st.dataframe(df.style.format({
     'B/P (€)': '{:,.2f}',
     'Rent. (%)': '{:.2f}%',
     'Invertido': '{:,.2f}'
+
 }), use_container_width=True)
