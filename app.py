@@ -1,44 +1,27 @@
 import streamlit as st
-# ... (los demás imports se quedan igual)
-
-# Función para verificar la contraseña
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == st.secrets["password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # No guardar la contraseña
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.text_input("Introduce la contraseña para ver la cartera", 
-                      type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Contraseña incorrecta", 
-                      type="password", on_change=password_entered, key="password")
-        return False
-    else:
-        return True
-
-# --- LÓGICA PRINCIPAL ---
-if check_password():
-    # AQUÍ PEGAS TODO EL RESTO DEL CÓDIGO QUE YA TENÍAS
-    st.title("📊 Control de Cartera Multidivisa")
-    # ... resto del código ...
-import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# Configuración de la página
-st.set_page_config(page_title="Mi Cartera Internacional", layout="wide")
+# 1. SEGURIDAD
+def check_password():
+    def password_entered():
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
 
-st.title("📊 Control de Cartera Multidivisa")
-st.markdown("Análisis en tiempo real con impacto de divisa (EUR/USD/GBP)")
+    if "password_correct" not in st.session_state:
+        st.text_input("Contraseña", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.text_input("Contraseña incorrecta", type="password", on_change=password_entered, key="password")
+        return False
+    return True
 
-# 1. BASE DE DATOS DE TU CARTERA
+# 2. CARTERA COMPLETA
 datos_cartera = {
     'ENG.MC': [19.89, 350, 'EUR'], 'ITX.MC': [24.55, 100, 'EUR'], 'RED.MC': [15.756, 350, 'EUR'],
     'TRE.MC': [25.51, 100, 'EUR'], 'MFEA.MC': [6.77, 140, 'EUR'], 'VIS.MC': [44.76, 30, 'EUR'],
@@ -61,102 +44,68 @@ datos_cartera = {
     'T': [31.47, 100, 'USD']
 }
 
-@st.cache_data(ttl=3600) # Cache para no saturar la API
 @st.cache_data(ttl=3600)
 def cargar_datos():
     tickers = list(datos_cartera.keys())
-    pares_divisas = ['EURUSD=X', 'EURGBP=X']
-    todos_los_simbolos = tickers + pares_divisas
+    pares = ['EURUSD=X', 'EURGBP=X']
+    precios = {}
+    errores = []
     
-    # Creamos un diccionario vacío para guardar los precios
-    precios_dict = {}
-    
-    for simbolo in todos_los_simbolos:
+    for s in tickers + pares:
         try:
-            # Descargamos los datos uno a uno para mayor seguridad
-            ticker_data = yf.download(simbolo, period="1y", progress=False)
+            df = yf.download(s, period="1y", progress=False)
+            if not df.empty:
+                col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
+                precios[s] = df[col]
+            else:
+                errores.append(s)
+        except:
+            errores.append(s)
             
-            # Verificamos si tenemos datos
-            if not ticker_data.empty:
-                # Usamos 'Close' o 'Adj Close' dependiendo de lo que devuelva Yahoo
-                columna = 'Adj Close' if 'Adj Close' in ticker_data.columns else 'Close'
-                # Guardamos solo la columna de precios
-                precios_dict[simbolo] = ticker_data[columna]
-        except Exception as e:
-            st.warning(f"No se pudieron cargar datos para {simbolo}")
-            continue
+    return pd.DataFrame(precios).ffill(), errores
 
-    # Unimos todos los precios en una sola tabla (DataFrame)
-    df_final = pd.DataFrame(precios_dict)
+# 3. INTERFAZ PRINCIPAL
+if check_password():
+    st.title("📊 Cartera Internacional")
     
-    # Rellenamos huecos (días festivos donde una bolsa abre y otra no)
-    df_final = df_final.ffill()
+    with st.spinner('Actualizando precios de mercado...'):
+        data, lista_errores = cargar_datos()
     
-    return df_final
+    if not data.empty:
+        hoy = data.index[-1]
+        resumen = []
+        
+        for t, info in datos_cartera.items():
+            if t not in data.columns: continue
+            
+            p_compra_eur, cant, div = info
+            p_act_orig = data.loc[hoy, t].values[0] if isinstance(data.loc[hoy, t], pd.Series) else data.loc[hoy, t]
+            
+            # Conversión
+            if div == 'USD': p_eur = p_act_orig / data.loc[hoy, 'EURUSD=X']
+            elif div == 'GBP': p_eur = (p_act_orig / 100) / data.loc[hoy, 'EURGBP=X']
+            else: p_eur = p_act_orig
+            
+            val_act = float(p_eur) * cant
+            inv = p_compra_eur * cant
+            
+            resumen.append({'Activo': t, 'Valor Actual (€)': val_act, 'B/P (€)': val_act - inv, 'Rent %': ((val_act/inv)-1)*100, 'Invertido': inv})
 
-data = cargar_datos()
-hoy = data.index[-1]
-y1_date = data.index[0]
+        df_res = pd.DataFrame(resumen)
+        
+        # Dashboard
+        m1, m2, m3 = st.columns(3)
+        total_inv = df_res['Invertido'].sum()
+        total_val = df_res['Valor Actual (€)'].sum()
+        m1.metric("Inversión", f"{total_inv:,.2f}€")
+        m2.metric("Valor Actual", f"{total_val:,.2f}€", f"{total_val-total_inv:,.2f}€")
+        m3.metric("Rentabilidad", f"{( (total_val/total_inv)-1)*100:.2f}%")
+        
+        st.plotly_chart(px.bar(df_res, x='Activo', y='B/P (€)', color='B/P (€)', color_continuous_scale='RdYlGn'))
+        st.dataframe(df_res.style.format({'Valor Actual (€)': '{:,.2f}', 'B/P (€)': '{:,.2f}', 'Rent %': '{:.2f}%'}))
 
-# Procesamiento
-resumen = []
-for t, info in datos_cartera.items():
-    p_compra_eur, cant, div = info
-    p_act = data.loc[hoy, t]
-    
-    # Obtener FX
-    fx_usd = data.loc[hoy, 'EURUSD=X']
-    fx_gbp = data.loc[hoy, 'EURGBP=X']
-    
-    # Conversión actual
-    if div == 'USD': p_eur = p_act / fx_usd
-    elif div == 'GBP': p_eur = (p_act / 100) / fx_gbp
-    else: p_eur = p_act
-    
-    val_act = p_eur * cant
-    invested = p_compra_eur * cant
-    profit = val_act - invested
-    
-    resumen.append({
-        'Activo': t,
-        'Valor Actual (€)': val_act,
-        'B/P (€)': profit,
-        'Rent. (%)': (profit / invested) * 100,
-        'Invertido': invested
-    })
-
-df = pd.DataFrame(resumen)
-
-# --- INTERFAZ ---
-total_inv = df['Invertido'].sum()
-total_val = df['Valor Actual (€)'].sum()
-total_profit = total_val - total_inv
-total_perc = (total_profit / total_inv) * 100
-
-# Métricas destacadas en el Sidebar
-st.sidebar.header("Resumen General")
-st.sidebar.metric("Inversión Total", f"{total_inv:,.2f} €")
-st.sidebar.metric("Valor Actual", f"{total_val:,.2f} €", f"{total_profit:,.2f} €")
-st.sidebar.metric("Rentabilidad Global", f"{total_perc:.2f} %")
-
-# Gráficos
-col1, col2 = st.columns(2)
-
-with col1:
-    fig_pie = px.pie(df, values='Valor Actual (€)', names='Activo', title="Peso de cada activo")
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-with col2:
-    fig_bar = px.bar(df, x='Activo', y='B/P (€)', color='B/P (€)', 
-                     title="Beneficio/Pérdida por Acción", color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-st.subheader("Detalle de Cartera")
-st.dataframe(df.style.format({
-    'Valor Actual (€)': '{:,.2f}',
-    'B/P (€)': '{:,.2f}',
-    'Rent. (%)': '{:.2f}%',
-    'Invertido': '{:,.2f}'
-
-}), use_container_width=True)
-
+    # Sección de Salud de Datos
+    if lista_errores:
+        with st.expander("⚠️ Aviso de Salud de la Cartera"):
+            st.write("Los siguientes tickers no respondieron y no aparecen en la tabla:")
+            st.write(", ".join(lista_errores))
