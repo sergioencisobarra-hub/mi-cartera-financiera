@@ -2,26 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
 
-# 1. SEGURIDAD
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == st.secrets["password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
+# Configuración de la página
+st.set_page_config(page_title="Mi Cartera Internacional", layout="wide")
 
-    if "password_correct" not in st.session_state:
-        st.text_input("Contraseña", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Contraseña incorrecta", type="password", on_change=password_entered, key="password")
-        return False
-    return True
-
-# 2. CARTERA COMPLETA
+# 1. BASE DE DATOS DE TU CARTERA
 datos_cartera = {
     'ENG.MC': [19.89, 350, 'EUR'], 'ITX.MC': [24.55, 100, 'EUR'], 'RED.MC': [15.756, 350, 'EUR'],
     'TRE.MC': [25.51, 100, 'EUR'], 'MFEA.MC': [6.77, 140, 'EUR'], 'VIS.MC': [44.76, 30, 'EUR'],
@@ -53,59 +38,85 @@ def cargar_datos():
     
     for s in tickers + pares:
         try:
-            df = yf.download(s, period="1y", progress=False)
-            if not df.empty:
-                col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
-                precios[s] = df[col]
+            # Descarga individual para evitar MultiIndex
+            df_temp = yf.download(s, period="5d", progress=False)
+            if not df_temp.empty:
+                # Forzamos la obtención del último valor disponible
+                precios[s] = float(df_temp['Close'].iloc[-1])
             else:
                 errores.append(s)
         except:
             errores.append(s)
-            
-    return pd.DataFrame(precios).ffill(), errores
+    return precios, errores
 
-# 3. INTERFAZ PRINCIPAL
-if check_password():
-    st.title("📊 Cartera Internacional")
+# --- LÓGICA PRINCIPAL ---
+st.title("📊 Mi Cartera Internacional")
+
+with st.spinner('Cargando datos de mercado...'):
+    precios_actuales, lista_errores = cargar_datos()
+
+if precios_actuales:
+    resumen = []
+    # Tipos de cambio (usamos 1.0 como base para EUR)
+    eur_usd = precios_actuales.get('EURUSD=X', 1.08)
+    eur_gbp = precios_actuales.get('EURGBP=X', 0.85)
     
-    with st.spinner('Actualizando precios de mercado...'):
-        data, lista_errores = cargar_datos()
-    
-    if not data.empty:
-        hoy = data.index[-1]
-        resumen = []
+    for t, info in datos_cartera.items():
+        if t not in precios_actuales:
+            continue
+            
+        p_compra_eur, cant, div = info
+        p_orig = precios_actuales[t]
         
-        for t, info in datos_cartera.items():
-            if t not in data.columns: continue
+        # Conversión a Euros
+        if div == 'USD':
+            p_eur = p_orig / eur_usd
+        elif div == 'GBP':
+            # Londres cotiza en peniques (GBp), dividimos por 100
+            p_eur = (p_orig / 100) / eur_gbp
+        else:
+            p_eur = p_orig
             
-            p_compra_eur, cant, div = info
-            p_act_orig = data.loc[hoy, t].values[0] if isinstance(data.loc[hoy, t], pd.Series) else data.loc[hoy, t]
-            
-            # Conversión
-            if div == 'USD': p_eur = p_act_orig / data.loc[hoy, 'EURUSD=X']
-            elif div == 'GBP': p_eur = (p_act_orig / 100) / data.loc[hoy, 'EURGBP=X']
-            else: p_eur = p_act_orig
-            
-            val_act = float(p_eur) * cant
-            inv = p_compra_eur * cant
-            
-            resumen.append({'Activo': t, 'Valor Actual (€)': val_act, 'B/P (€)': val_act - inv, 'Rent %': ((val_act/inv)-1)*100, 'Invertido': inv})
+        valor_actual = p_eur * cant
+        invertido = p_compra_eur * cant
+        ganancia = valor_actual - invertido
+        
+        resumen.append({
+            'Activo': t,
+            'Valor Actual (€)': valor_actual,
+            'Invertido (€)': invertido,
+            'B/P (€)': ganancia,
+            'Rent. (%)': (ganancia / invertido) * 100 if invertido != 0 else 0
+        })
 
-        df_res = pd.DataFrame(resumen)
-        
-        # Dashboard
-        m1, m2, m3 = st.columns(3)
-        total_inv = df_res['Invertido'].sum()
-        total_val = df_res['Valor Actual (€)'].sum()
-        m1.metric("Inversión", f"{total_inv:,.2f}€")
-        m2.metric("Valor Actual", f"{total_val:,.2f}€", f"{total_val-total_inv:,.2f}€")
-        m3.metric("Rentabilidad", f"{( (total_val/total_inv)-1)*100:.2f}%")
-        
-        st.plotly_chart(px.bar(df_res, x='Activo', y='B/P (€)', color='B/P (€)', color_continuous_scale='RdYlGn'))
-        st.dataframe(df_res.style.format({'Valor Actual (€)': '{:,.2f}', 'B/P (€)': '{:,.2f}', 'Rent %': '{:.2f}%'}))
+    df = pd.DataFrame(resumen)
 
-    # Sección de Salud de Datos
+    # Métricas Globales
+    total_inv = df['Invertido (€)'].sum()
+    total_val = df['Valor Actual (€)'].sum()
+    total_bp = total_val - total_inv
+    total_perc = (total_bp / total_inv) * 100 if total_inv != 0 else 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Invertido", f"{total_inv:,.2f} €")
+    c2.metric("Valor Cartera", f"{total_val:,.2f} €", f"{total_bp:,.2f} €")
+    c3.metric("Rentabilidad Total", f"{total_perc:.2f} %")
+
+    # Gráficos
+    st.plotly_chart(px.bar(df, x='Activo', y='B/P (€)', color='B/P (€)', 
+                           title="Beneficio/Pérdida por Activo",
+                           color_continuous_scale='RdYlGn'), use_container_width=True)
+
+    st.subheader("Detalle de posiciones")
+    st.dataframe(df.style.format({
+        'Valor Actual (€)': '{:,.2f}',
+        'Invertido (€)': '{:,.2f}',
+        'B/P (€)': '{:,.2f}',
+        'Rent. (%)': '{:.2f}%'
+    }), use_container_width=True)
+
     if lista_errores:
-        with st.expander("⚠️ Aviso de Salud de la Cartera"):
-            st.write("Los siguientes tickers no respondieron y no aparecen en la tabla:")
+        with st.expander("Ver activos no disponibles"):
             st.write(", ".join(lista_errores))
+else:
+    st.error("No se pudieron obtener datos de Yahoo Finance. Reintenta en unos minutos.")
