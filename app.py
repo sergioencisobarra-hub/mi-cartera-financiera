@@ -9,12 +9,21 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
+    # =========================
+    # CARGA Y LIMPIEZA
+    # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
+
+    df = df[df["IDENTIFICADOR"].notna()]
+    df = df[df["IDENTIFICADOR"] != df["TIPO"]]
 
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
+    # =========================
+    # CONVERSIÓN A YAHOO
+    # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -34,17 +43,21 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
+    # =========================
+    # TIPOS DE CAMBIO
+    # =========================
     eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
     gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
-    precios = []
+    precios_eur = []
 
+    # =========================
+    # DESCARGA Y CONVERSIÓN
+    # =========================
     for index, row in df.iterrows():
 
         ticker = row["Ticker"]
-        tipo = row["TIPO"]
-        divisa = row["DIVISA"]
-        convertir = str(row.get("CONVERTIR", "NO")).upper()
+        divisa = str(row["DIVISA"]).upper()
 
         try:
             ticker_obj = yf.Ticker(ticker)
@@ -55,37 +68,33 @@ if uploaded_file is not None:
 
             precio = float(hist["Close"].iloc[-1])
 
-            # ACCIONES / ETFs
-            if tipo in ["ACCION", "ETF"]:
+            # CONVERSIÓN DIRECTA SEGÚN DIVISA
+            if divisa == "USD":
+                precio = precio / eurusd
 
-                if divisa == "USD":
-                    precio = precio / eurusd
+            elif divisa == "GBP":
+                # Yahoo UK devuelve pence
+                precio = precio / 100
+                precio = (precio * gbpusd) / eurusd
 
-                elif divisa == "GBP":
-                    precio = precio / 100
-                    precio = (precio * gbpusd) / eurusd
+            # EUR no se toca
 
-            # FONDOS
-            elif tipo == "FONDO":
-
-                if convertir == "SI":
-
-                    if divisa == "USD":
-                        precio = precio / eurusd
-
-                    elif divisa == "GBP":
-                        precio = precio / 100
-                        precio = (precio * gbpusd) / eurusd
-
-            precios.append(precio)
+            precios_eur.append(precio)
 
         except:
             st.warning(f"No se pudo obtener precio para {ticker}")
-            precios.append(None)
+            precios_eur.append(None)
 
-    df["Precio Actual €"] = precios
+    df["Precio Actual €"] = precios_eur
     df = df.dropna(subset=["Precio Actual €"])
 
+    if df.empty:
+        st.error("No hay datos válidos.")
+        st.stop()
+
+    # =========================
+    # CÁLCULOS
+    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
 
@@ -96,9 +105,23 @@ if uploaded_file is not None:
     total_actual = df["Valor Actual €"].sum()
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
+    # =========================
+    # DASHBOARD
+    # =========================
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
 
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(
+        df[[
+            "EMPRESA",
+            "TIPO",
+            "DIVISA",
+            "ACCIONES",
+            "Precio Actual €",
+            "Valor Actual €",
+            "Rentabilidad %"
+        ]],
+        use_container_width=True
+    )
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
