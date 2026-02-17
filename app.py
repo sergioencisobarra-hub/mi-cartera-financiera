@@ -16,7 +16,7 @@ if uploaded_file is not None:
     # Quinta columna = ticker
     df["Ticker_Original"] = df.iloc[:, 4].astype(str)
 
-    # Conversión a formato Yahoo Finance
+    # Conversión a formato Yahoo
     def convertir_ticker(t):
         t = t.strip()
         if t.startswith("BME:"):
@@ -41,7 +41,7 @@ if uploaded_file is not None:
 
     try:
         eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
-        eurgbp = float(yf.download("EURGBP=X", period="1d", progress=False)["Close"].iloc[-1])
+        gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
     except:
         st.error("No se pudieron descargar tipos de cambio.")
         st.stop()
@@ -59,13 +59,20 @@ if uploaded_file is not None:
 
             precio = float(datos["Close"].iloc[-1])
 
-            # Conversión divisa
-            if t.endswith(".L"):  # GBP
-                precio = precio / eurgbp
-            elif "." not in t:  # USD
-                precio = precio / eurusd
+            # Si es UK (GBP)
+            if t.endswith(".L"):
+                precio_usd = precio * gbpusd
+                precio_eur = precio_usd / eurusd
 
-            precios_actuales.append(precio)
+            # Si es USA (USD)
+            elif "." not in t:
+                precio_eur = precio / eurusd
+
+            # Si es Europa (ya en EUR)
+            else:
+                precio_eur = precio
+
+            precios_actuales.append(precio_eur)
 
         except:
             st.warning(f"No se pudo obtener precio para {t}")
