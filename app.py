@@ -9,14 +9,11 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
-    # Leer Excel
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    # Quinta columna = ticker
     df["Ticker_Original"] = df.iloc[:, 4].astype(str)
 
-    # Conversión a formato Yahoo
     def convertir_ticker(t):
         t = t.strip()
         if t.startswith("BME:"):
@@ -37,72 +34,50 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["Ticker_Original"].apply(convertir_ticker).str.upper()
 
-    st.subheader("Descargando tipos de cambio...")
+    # Tipos de cambio
+    eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+    gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
 
-    try:
-        eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
-        gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
-    except:
-        st.error("No se pudieron descargar tipos de cambio.")
-        st.stop()
-
-    precios_actuales = []
-
-    st.subheader("Descargando precios de mercado...")
+    precios_unitarios = []
 
     for t in df["Ticker"]:
         try:
             datos = yf.download(t, period="1d", progress=False)
-
             if datos.empty:
                 raise Exception("Sin datos")
 
-            precio = float(datos["Close"].iloc[-1])
+            precio_unitario = float(datos["Close"].iloc[-1])
 
-            # Si es UK (GBP)
+            # UK → GBP
             if t.endswith(".L"):
-                precio_usd = precio * gbpusd
-                precio_eur = precio_usd / eurusd
+                precio_unitario = (precio_unitario * gbpusd) / eurusd
 
-            # Si es USA (USD)
+            # USA → USD
             elif "." not in t:
-                precio_eur = precio / eurusd
+                precio_unitario = precio_unitario / eurusd
 
-            # Si es Europa (ya en EUR)
-            else:
-                precio_eur = precio
+            # Europa → ya EUR
 
-            precios_actuales.append(precio_eur)
+            precios_unitarios.append(precio_unitario)
 
         except:
             st.warning(f"No se pudo obtener precio para {t}")
-            precios_actuales.append(None)
+            precios_unitarios.append(None)
 
-    df["Precio Actual €"] = precios_actuales
+    df["Precio Unitario Actual €"] = precios_unitarios
+    df = df.dropna(subset=["Precio Unitario Actual €"])
 
-    # Eliminar posiciones sin precio
-    df = df.dropna(subset=["Precio Actual €"])
+    # Ahora sí: valor total actual
+    df["Valor Actual €"] = df["Precio Unitario Actual €"] * df["ACCIONES"]
 
-    if df.empty:
-        st.error("No se pudo obtener ningún precio válido.")
-        st.stop()
-
-    # Cálculos financieros
-    df["Precio Actual €"] = pd.to_numeric(df["Precio Actual €"], errors="coerce")
-    df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
 
-    df["Valor Actual €"] = pd.to_numeric(df["Valor Actual €"], errors="coerce")
-    df["Inversión Inicial €"] = pd.to_numeric(df["Inversión Inicial €"], errors="coerce")
-
-    df = df.dropna(subset=["Valor Actual €", "Inversión Inicial €"])
+    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
+    df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
 
     total_inicial = float(df["Inversión Inicial €"].sum())
     total_actual = float(df["Valor Actual €"].sum())
     rentabilidad_total = ((total_actual - total_inicial) / total_inicial) * 100
-
-    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
-    df["Rentabilidad %"] = (df["Rentabilidad €"] / df["Inversión Inicial €"]) * 100
 
     st.divider()
 
@@ -115,22 +90,16 @@ if uploaded_file is not None:
 
     st.subheader("Detalle por posición")
     st.dataframe(
-        df.sort_values("Rentabilidad %", ascending=False),
+        df[[
+            "Ticker",
+            "ACCIONES",
+            "Precio Unitario Actual €",
+            "Valor Actual €",
+            "Inversión Inicial €",
+            "Rentabilidad €",
+            "Rentabilidad %"
+        ]].sort_values("Rentabilidad %", ascending=False),
         use_container_width=True
-    )
-
-    st.subheader("Top 10 Ganadores")
-    st.bar_chart(
-        df.sort_values("Rentabilidad %", ascending=False)
-        .head(10)
-        .set_index("Ticker")["Rentabilidad %"]
-    )
-
-    st.subheader("Top 10 Perdedores")
-    st.bar_chart(
-        df.sort_values("Rentabilidad %")
-        .head(10)
-        .set_index("Ticker")["Rentabilidad %"]
     )
 
 else:
