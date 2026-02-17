@@ -38,30 +38,27 @@ if uploaded_file is not None:
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
     # Tipos de cambio
-    eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
-    gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+    eurusd = yf.Ticker("EURUSD=X").fast_info["lastPrice"]
+    gbpusd = yf.Ticker("GBPUSD=X").fast_info["lastPrice"]
 
     precios = []
 
     for ticker in df["Ticker"]:
 
         try:
-            datos = yf.download(ticker, period="1d", progress=False)
+            ticker_obj = yf.Ticker(ticker)
+            precio = ticker_obj.fast_info["lastPrice"]
 
-            if datos.empty:
-                raise Exception("Sin datos")
+            if precio is None:
+                raise Exception("Sin precio")
 
-            precio = float(datos["Close"].iloc[-1])
-
-            # UK (.L) → GBP
+            # UK (.L)
             if ticker.endswith(".L"):
                 precio = (precio * gbpusd) / eurusd
 
             # USA (sin punto)
             elif "." not in ticker:
                 precio = precio / eurusd
-
-            # Europa ya en EUR
 
             precios.append(precio)
 
@@ -84,33 +81,26 @@ if uploaded_file is not None:
 
     total_inicial = df["Inversión Inicial €"].sum()
     total_actual = df["Valor Actual €"].sum()
-
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
-
-    # Clasificación geográfica
-    def clasificar_region(ticker):
-        if ticker.endswith(".MC"):
-            return "España"
-        if ticker.endswith(".L"):
-            return "UK"
-        if ticker.endswith(".DE") or ticker.endswith(".AS") or ticker.endswith(".PA"):
-            return "Europa"
-        if "." not in ticker:
-            return "USA"
-        return "Otros"
-
-    df["REGION"] = df["Ticker"].apply(clasificar_region)
 
     st.divider()
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
     st.divider()
 
+    # =============================
     # ACCIONES
+    # =============================
     st.header("📈 ACCIONES")
     acciones = df[df["TIPO"] == "ACCION"]
 
-    for region in ["España", "UK", "USA", "Europa"]:
-        bloque = acciones[acciones["REGION"] == region]
+    for region, filtro in {
+        "España": acciones["Ticker"].str.endswith(".MC"),
+        "UK": acciones["Ticker"].str.endswith(".L"),
+        "Europa": acciones["Ticker"].str.endswith((".DE", ".AS", ".PA")),
+        "USA": ~acciones["Ticker"].str.contains(".")
+    }.items():
+
+        bloque = acciones[filtro]
 
         if not bloque.empty:
             st.subheader(region)
@@ -125,7 +115,9 @@ if uploaded_file is not None:
 
             st.dataframe(bloque.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
 
+    # =============================
     # ETFs
+    # =============================
     st.header("📊 ETFs")
     etfs = df[df["TIPO"] == "ETF"]
 
@@ -140,7 +132,9 @@ if uploaded_file is not None:
 
         st.dataframe(etfs.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
 
+    # =============================
     # FONDOS
+    # =============================
     st.header("🏦 FONDOS")
     fondos = df[df["TIPO"] == "FONDO"]
 
