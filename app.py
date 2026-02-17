@@ -38,25 +38,37 @@ if uploaded_file is not None:
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
     # Tipos de cambio
-    eurusd = yf.Ticker("EURUSD=X").fast_info["lastPrice"]
-    gbpusd = yf.Ticker("GBPUSD=X").fast_info["lastPrice"]
+    eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
+    gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
     precios = []
 
-    for ticker in df["Ticker"]:
+    for index, row in df.iterrows():
+
+        ticker = row["Ticker"]
+        tipo = row["TIPO"]
 
         try:
             ticker_obj = yf.Ticker(ticker)
-            precio = ticker_obj.fast_info["lastPrice"]
+
+            # ACCION / ETF → fast_info
+            if tipo in ["ACCION", "ETF"]:
+                precio = ticker_obj.fast_info.get("lastPrice", None)
+
+            # FONDO → usar history (NAV suele estar aquí)
+            else:
+                hist = ticker_obj.history(period="1d")
+                if hist.empty:
+                    raise Exception("Sin datos")
+                precio = float(hist["Close"].iloc[-1])
 
             if precio is None:
                 raise Exception("Sin precio")
 
-            # UK (.L)
+            # Conversión divisa SOLO por sufijo
             if ticker.endswith(".L"):
                 precio = (precio * gbpusd) / eurusd
 
-            # USA (sin punto)
             elif "." not in ticker:
                 precio = precio / eurusd
 
@@ -70,7 +82,7 @@ if uploaded_file is not None:
     df = df.dropna(subset=["ACCIONES", "PRECIO TOTAL", "Precio Actual €"])
 
     if df.empty:
-        st.error("No hay datos válidos para calcular.")
+        st.error("No hay datos válidos.")
         st.stop()
 
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
@@ -81,73 +93,22 @@ if uploaded_file is not None:
 
     total_inicial = df["Inversión Inicial €"].sum()
     total_actual = df["Valor Actual €"].sum()
+
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
-    st.divider()
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
-    st.divider()
 
-    # =============================
-    # ACCIONES
-    # =============================
-    st.header("📈 ACCIONES")
-    acciones = df[df["TIPO"] == "ACCION"]
-
-    for region, filtro in {
-        "España": acciones["Ticker"].str.endswith(".MC"),
-        "UK": acciones["Ticker"].str.endswith(".L"),
-        "Europa": acciones["Ticker"].str.endswith((".DE", ".AS", ".PA")),
-        "USA": ~acciones["Ticker"].str.contains(".")
-    }.items():
-
-        bloque = acciones[filtro]
-
-        if not bloque.empty:
-            st.subheader(region)
-
-            valor = bloque["Valor Actual €"].sum()
-            inversion = bloque["Inversión Inicial €"].sum()
-            rent = (valor - inversion) / inversion * 100
-
-            col1, col2 = st.columns(2)
-            col1.metric("Valor Actual", f"{valor:,.2f} €")
-            col2.metric("Rentabilidad", f"{rent:.2f} %")
-
-            st.dataframe(bloque.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
-
-    # =============================
-    # ETFs
-    # =============================
-    st.header("📊 ETFs")
-    etfs = df[df["TIPO"] == "ETF"]
-
-    if not etfs.empty:
-        valor = etfs["Valor Actual €"].sum()
-        inversion = etfs["Inversión Inicial €"].sum()
-        rent = (valor - inversion) / inversion * 100
-
-        col1, col2 = st.columns(2)
-        col1.metric("Valor Actual ETFs", f"{valor:,.2f} €")
-        col2.metric("Rentabilidad ETFs", f"{rent:.2f} %")
-
-        st.dataframe(etfs.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
-
-    # =============================
-    # FONDOS
-    # =============================
-    st.header("🏦 FONDOS")
-    fondos = df[df["TIPO"] == "FONDO"]
-
-    if not fondos.empty:
-        valor = fondos["Valor Actual €"].sum()
-        inversion = fondos["Inversión Inicial €"].sum()
-        rent = (valor - inversion) / inversion * 100
-
-        col1, col2 = st.columns(2)
-        col1.metric("Valor Actual Fondos", f"{valor:,.2f} €")
-        col2.metric("Rentabilidad Fondos", f"{rent:.2f} %")
-
-        st.dataframe(fondos.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
+    st.dataframe(
+        df[[
+            "Ticker",
+            "TIPO",
+            "ACCIONES",
+            "Precio Actual €",
+            "Valor Actual €",
+            "Rentabilidad %"
+        ]],
+        use_container_width=True
+    )
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
