@@ -9,12 +9,22 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
+    # ==============================
+    # 1️⃣ CARGA EXCEL
+    # ==============================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    # Quinta columna = ticker
+    # Forzar columnas numéricas reales
+    df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
+    df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
+
+    # Quinta columna = ticker original
     df["Ticker_Original"] = df.iloc[:, 4].astype(str)
 
+    # ==============================
+    # 2️⃣ CONVERSIÓN A YAHOO
+    # ==============================
     def convertir_ticker(t):
         t = t.strip()
         if t.startswith("BME:"):
@@ -35,10 +45,19 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["Ticker_Original"].apply(convertir_ticker).str.upper()
 
-    # Tipos de cambio
-    eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
-    gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+    # ==============================
+    # 3️⃣ TIPOS DE CAMBIO
+    # ==============================
+    try:
+        eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+        gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+    except:
+        st.error("No se pudieron descargar tipos de cambio.")
+        st.stop()
 
+    # ==============================
+    # 4️⃣ DESCARGA PRECIOS POR ACCIÓN
+    # ==============================
     precios_por_accion = []
 
     for t in df["Ticker"]:
@@ -49,15 +68,21 @@ if uploaded_file is not None:
 
             precio = float(datos["Close"].iloc[-1])
 
-            # UK (GBP → USD → EUR)
+            # 🇬🇧 UK (GBP)
             if t.endswith(".L"):
+
+                # Muchas acciones UK cotizan en peniques
+                if precio > 100:
+                    precio = precio / 100
+
+                # GBP → USD → EUR
                 precio = (precio * gbpusd) / eurusd
 
-            # USA (USD → EUR)
+            # 🇺🇸 USA (USD)
             elif "." not in t:
                 precio = precio / eurusd
 
-            # Europa ya está en EUR
+            # 🇪🇺 Europa ya en EUR
 
             precios_por_accion.append(precio)
 
@@ -66,20 +91,26 @@ if uploaded_file is not None:
             precios_por_accion.append(None)
 
     df["Precio por Acción €"] = precios_por_accion
-    df = df.dropna(subset=["Precio por Acción €"])
 
-    # Ahora sí: valor total SOLO UNA VEZ
+    # Eliminar filas inválidas
+    df = df.dropna(subset=["ACCIONES", "PRECIO TOTAL", "Precio por Acción €"])
+
+    # ==============================
+    # 5️⃣ CÁLCULOS FINANCIEROS
+    # ==============================
     df["Valor Actual €"] = df["Precio por Acción €"] * df["ACCIONES"]
-
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
 
     df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
-    df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
+    df["Rentabilidad %"] = (df["Rentabilidad €"] / df["Inversión Inicial €"]) * 100
 
     total_inicial = float(df["Inversión Inicial €"].sum())
     total_actual = float(df["Valor Actual €"].sum())
     rentabilidad_total = ((total_actual - total_inicial) / total_inicial) * 100
 
+    # ==============================
+    # 6️⃣ DASHBOARD
+    # ==============================
     st.divider()
 
     col1, col2, col3 = st.columns(3)
