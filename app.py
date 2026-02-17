@@ -45,4 +45,63 @@ if uploaded_file is not None:
         try:
             datos = yf.download(t, period="1d", progress=False)
             if datos.empty:
-                raise Ex
+                raise Exception("Sin datos")
+
+            precio = float(datos["Close"].iloc[-1])
+
+            # UK (GBP → USD → EUR)
+            if t.endswith(".L"):
+                precio = (precio * gbpusd) / eurusd
+
+            # USA (USD → EUR)
+            elif "." not in t:
+                precio = precio / eurusd
+
+            # Europa ya está en EUR
+
+            precios_por_accion.append(precio)
+
+        except:
+            st.warning(f"No se pudo obtener precio para {t}")
+            precios_por_accion.append(None)
+
+    df["Precio por Acción €"] = precios_por_accion
+    df = df.dropna(subset=["Precio por Acción €"])
+
+    # Ahora sí: valor total SOLO UNA VEZ
+    df["Valor Actual €"] = df["Precio por Acción €"] * df["ACCIONES"]
+
+    df["Inversión Inicial €"] = df["PRECIO TOTAL"]
+
+    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
+    df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
+
+    total_inicial = float(df["Inversión Inicial €"].sum())
+    total_actual = float(df["Valor Actual €"].sum())
+    rentabilidad_total = ((total_actual - total_inicial) / total_inicial) * 100
+
+    st.divider()
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
+    col2.metric("Valor Actual", f"{total_actual:,.2f} €")
+    col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
+
+    st.divider()
+
+    st.subheader("Detalle por posición")
+    st.dataframe(
+        df[[
+            "Ticker",
+            "ACCIONES",
+            "Precio por Acción €",
+            "Valor Actual €",
+            "Inversión Inicial €",
+            "Rentabilidad €",
+            "Rentabilidad %"
+        ]].sort_values("Rentabilidad %", ascending=False),
+        use_container_width=True
+    )
+
+else:
+    st.info("Sube tu archivo Excel para empezar.")
