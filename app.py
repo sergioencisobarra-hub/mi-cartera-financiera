@@ -39,5 +39,7 @@ if uploaded_file is not None:
     tickers = df["Ticker"].tolist()
 
     # Descargar precios
-    data = yf.d
+    data = yf.download(tickers, period="1d", progress=False)
+
+
 
