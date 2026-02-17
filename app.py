@@ -9,21 +9,12 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
-    # ==================================
-    # 1️⃣ CARGA Y LIMPIEZA
-    # ==================================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
-
-    df = df[df["IDENTIFICADOR"].notna()]
-    df = df[df["IDENTIFICADOR"] != df["TIPO"]]
 
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
-    # ==================================
-    # 2️⃣ CONVERSIÓN IDENTIFICADOR → YAHOO
-    # ==================================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -43,26 +34,17 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
-    # ==================================
-    # 3️⃣ TIPOS DE CAMBIO
-    # ==================================
     eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
     gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
-    st.write("EURUSD:", eurusd)
-    st.write("GBPUSD:", gbpusd)
+    precios = []
 
-    precios_brutos = []
-    precios_eur = []
-
-    # ==================================
-    # 4️⃣ DESCARGA DE PRECIOS
-    # ==================================
     for index, row in df.iterrows():
 
         ticker = row["Ticker"]
-        tipo = str(row["TIPO"]).upper()
-        divisa = str(row["DIVISA"]).upper()
+        tipo = row["TIPO"]
+        divisa = row["DIVISA"]
+        convertir = str(row.get("CONVERTIR", "NO")).upper()
 
         try:
             ticker_obj = yf.Ticker(ticker)
@@ -71,53 +53,39 @@ if uploaded_file is not None:
             if hist.empty:
                 raise Exception("Sin datos")
 
-            precio_bruto = float(hist["Close"].iloc[-1])
-            precios_brutos.append(precio_bruto)
+            precio = float(hist["Close"].iloc[-1])
 
-            # ===============================
-            # LÓGICA DE CONVERSIÓN DEFINITIVA
-            # ===============================
-
-            # ACCIONES Y ETFs
+            # ACCIONES / ETFs
             if tipo in ["ACCION", "ETF"]:
 
                 if divisa == "USD":
-                    precio_eur = precio_bruto / eurusd
+                    precio = precio / eurusd
 
                 elif divisa == "GBP":
-                    # Yahoo devuelve pence
-                    precio_gbp = precio_bruto / 100
-                    precio_eur = (precio_gbp * gbpusd) / eurusd
+                    precio = precio / 100
+                    precio = (precio * gbpusd) / eurusd
 
-                else:  # EUR
-                    precio_eur = precio_bruto
-
-            # FONDOS → NO convertir (Yahoo ya devuelve en EUR en tus casos)
+            # FONDOS
             elif tipo == "FONDO":
-                precio_eur = precio_bruto
 
-            else:
-                precio_eur = precio_bruto
+                if convertir == "SI":
 
-            precios_eur.append(precio_eur)
+                    if divisa == "USD":
+                        precio = precio / eurusd
+
+                    elif divisa == "GBP":
+                        precio = precio / 100
+                        precio = (precio * gbpusd) / eurusd
+
+            precios.append(precio)
 
         except:
             st.warning(f"No se pudo obtener precio para {ticker}")
-            precios_brutos.append(None)
-            precios_eur.append(None)
+            precios.append(None)
 
-    df["Precio Bruto Descargado"] = precios_brutos
-    df["Precio Actual €"] = precios_eur
-
+    df["Precio Actual €"] = precios
     df = df.dropna(subset=["Precio Actual €"])
 
-    if df.empty:
-        st.error("No hay datos válidos.")
-        st.stop()
-
-    # ==================================
-    # 5️⃣ CÁLCULOS
-    # ==================================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
 
@@ -128,26 +96,9 @@ if uploaded_file is not None:
     total_actual = df["Valor Actual €"].sum()
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
-    # ==================================
-    # 6️⃣ DASHBOARD
-    # ==================================
-    st.divider()
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
-    st.divider()
 
-    st.dataframe(
-        df[[
-            "EMPRESA",
-            "TIPO",
-            "DIVISA",
-            "ACCIONES",
-            "Precio Bruto Descargado",
-            "Precio Actual €",
-            "Valor Actual €",
-            "Rentabilidad %"
-        ]],
-        use_container_width=True
-    )
+    st.dataframe(df, use_container_width=True)
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
