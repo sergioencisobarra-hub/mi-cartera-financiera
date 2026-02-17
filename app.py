@@ -9,13 +9,14 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
+    # Leer Excel
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    # Tomamos la quinta columna como ticker (índice 4)
-    df["Ticker"] = df.iloc[:, 4].astype(str)
+    # Quinta columna = ticker
+    df["Ticker_Original"] = df.iloc[:, 4].astype(str)
 
-    # Función para convertir a formato Yahoo Finance
+    # Convertir a formato Yahoo
     def convertir_ticker(t):
         t = t.strip()
         if t.startswith("BME:"):
@@ -34,50 +35,59 @@ if uploaded_file is not None:
             return t.split(":")[1] + ".PA"
         return t
 
-    df["Ticker"] = df["Ticker"].apply(convertir_ticker).str.upper()
+    df["Ticker"] = df["Ticker_Original"].apply(convertir_ticker).str.upper()
 
-    tickers = df["Ticker"].tolist()
-
-    # Descargar precios
-    data = yf.download(tickers, period="1d", progress=False)
-
-    if "Close" not in data:
-        st.error("No se pudieron descargar precios.")
-        st.stop()
-
-    precios_cierre = data["Close"].iloc[-1]
-
-    # Descargar tipos de cambio
-    eurusd = yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1]
-    eurgbp = yf.download("EURGBP=X", period="1d", progress=False)["Close"].iloc[-1]
+    st.write("Tickers convertidos:", df["Ticker"].tolist())
 
     precios_actuales = []
     tickers_validos = []
 
-    for t in df["Ticker"]:
-        if t in precios_cierre.index:
-            precio = precios_cierre[t]
+    # Descargar tipo de cambio primero
+    try:
+        eurusd = yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1]
+        eurgbp = yf.download("EURGBP=X", period="1d", progress=False)["Close"].iloc[-1]
+    except:
+        st.error("No se pudieron descargar tipos de cambio.")
+        st.stop()
 
-            # UK → GBP
-            if t.endswith(".L"):
+    st.write("EURUSD:", eurusd)
+    st.write("EURGBP:", eurgbp)
+
+    st.subheader("Descargando precios...")
+
+    for t in df["Ticker"]:
+        try:
+            datos = yf.download(t, period="1d", progress=False)
+            if datos.empty:
+                raise Exception("Sin datos")
+
+            precio = datos["Close"].iloc[-1]
+
+            # Convertir divisa
+            if t.endswith(".L"):  # Reino Unido (GBP)
                 precio = precio / eurgbp
 
-            # USA → USD (sin sufijo de país)
-            elif "." not in t:
+            elif "." not in t:  # USA (USD)
                 precio = precio / eurusd
 
             precios_actuales.append(precio)
             tickers_validos.append(True)
-        else:
-            st.warning(f"No se encontró precio para {t}")
+
+        except:
+            st.warning(f"No se pudo obtener precio para {t}")
             precios_actuales.append(None)
             tickers_validos.append(False)
 
     df["Precio Actual €"] = precios_actuales
 
-    # Eliminar posiciones sin precio
+    # Eliminar los que no tengan precio
     df = df.dropna(subset=["Precio Actual €"])
 
+    if df.empty:
+        st.error("No se pudo obtener ningún precio válido.")
+        st.stop()
+
+    # Cálculos financieros
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
     df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
@@ -87,10 +97,14 @@ if uploaded_file is not None:
     total_actual = df["Valor Actual €"].sum()
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
+    st.divider()
+
     col1, col2, col3 = st.columns(3)
     col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
     col2.metric("Valor Actual", f"{total_actual:,.2f} €")
     col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
+
+    st.divider()
 
     st.subheader("Detalle por posición")
     st.dataframe(
