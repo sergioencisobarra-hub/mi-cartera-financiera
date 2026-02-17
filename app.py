@@ -77,4 +77,6 @@ if uploaded_file is not None:
     col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
 
     st.subheader("Detalle por posición")
-    st.dataframe(df.sort_values("Rentabilidad %", ascending=False)_
+    st.dataframe(df.sort_values("Rentabilidad %", ascending=False))
+
+
