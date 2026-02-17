@@ -11,7 +11,21 @@ if uploaded_file is not None:
 
     df = pd.read_excel(uploaded_file)
 
-    df["Ticker"] = df["STICKER"].str.replace(":", "-")
+# Limpiar nombres de columnas (quita espacios invisibles)
+df.columns = df.columns.str.strip()
+
+# Mostrar columnas detectadas (para debug)
+st.write("Columnas detectadas:", df.columns)
+
+# Detectar automáticamente columna del ticker
+col_ticker = [c for c in df.columns if "STICKER" in c.upper()]
+
+if not col_ticker:
+    st.error("No se encontró columna de ticker.")
+    st.stop()
+
+df["Ticker"] = df[col_ticker[0]].astype(str)
+
 
     tickers = df["Ticker"].tolist()
     data = yf.download(tickers, period="1d")["Close"].iloc[-1]
@@ -51,3 +65,4 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
