@@ -9,9 +9,6 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
-    # ==============================
-    # 1️⃣ CARGA EXCEL
-    # ==============================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
@@ -21,9 +18,6 @@ if uploaded_file is not None:
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
-    # ==============================
-    # 2️⃣ CONVERSIÓN A YAHOO
-    # ==============================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -43,62 +37,45 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
-    # ==============================
-    # 3️⃣ TIPOS DE CAMBIO
-    # ==============================
-    try:
-        eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
-        gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
-    except:
-        st.error("No se pudieron descargar tipos de cambio.")
-        st.stop()
+    # Tipos de cambio
+    eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+    gbpusd = float(yf.download("GBPUSD=X", period="1d", progress=False)["Close"].iloc[-1])
 
     precios = []
-    monedas = []
 
-    # ==============================
-    # 4️⃣ DESCARGA PRECIOS + DETECCIÓN MONEDA REAL
-    # ==============================
-    for index, row in df.iterrows():
-
-        ticker = row["Ticker"]
+    for ticker in df["Ticker"]:
 
         try:
-            ticker_obj = yf.Ticker(ticker)
-            datos = ticker_obj.history(period="1d")
+            datos = yf.download(ticker, period="1d", progress=False)
 
             if datos.empty:
                 raise Exception("Sin datos")
 
             precio = float(datos["Close"].iloc[-1])
-            moneda = ticker_obj.info.get("currency", "EUR")
 
-            # Conversión automática según moneda real
-            if moneda == "USD":
-                precio = precio / eurusd
-            elif moneda == "GBP":
+            # UK (.L) → GBP
+            if ticker.endswith(".L"):
                 precio = (precio * gbpusd) / eurusd
 
+            # USA (sin punto)
+            elif "." not in ticker:
+                precio = precio / eurusd
+
+            # Europa ya en EUR
+
             precios.append(precio)
-            monedas.append(moneda)
 
         except:
             st.warning(f"No se pudo obtener precio para {ticker}")
             precios.append(None)
-            monedas.append(None)
 
     df["Precio Actual €"] = precios
-    df["Moneda Original"] = monedas
-
     df = df.dropna(subset=["ACCIONES", "PRECIO TOTAL", "Precio Actual €"])
 
     if df.empty:
         st.error("No hay datos válidos para calcular.")
         st.stop()
 
-    # ==============================
-    # 5️⃣ CÁLCULOS FINANCIEROS
-    # ==============================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
 
@@ -108,15 +85,9 @@ if uploaded_file is not None:
     total_inicial = df["Inversión Inicial €"].sum()
     total_actual = df["Valor Actual €"].sum()
 
-    if total_inicial == 0:
-        st.error("La inversión inicial total es 0.")
-        st.stop()
-
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
-    # ==============================
-    # 6️⃣ CLASIFICACIÓN GEOGRÁFICA
-    # ==============================
+    # Clasificación geográfica
     def clasificar_region(ticker):
         if ticker.endswith(".MC"):
             return "España"
@@ -130,16 +101,11 @@ if uploaded_file is not None:
 
     df["REGION"] = df["Ticker"].apply(clasificar_region)
 
-    # ==============================
-    # 7️⃣ DASHBOARD GENERAL
-    # ==============================
     st.divider()
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
     st.divider()
 
-    # ==============================
-    # 8️⃣ BLOQUE ACCIONES
-    # ==============================
+    # ACCIONES
     st.header("📈 ACCIONES")
     acciones = df[df["TIPO"] == "ACCION"]
 
@@ -157,16 +123,9 @@ if uploaded_file is not None:
             col1.metric("Valor Actual", f"{valor:,.2f} €")
             col2.metric("Rentabilidad", f"{rent:.2f} %")
 
-            st.dataframe(
-                bloque.sort_values("Rentabilidad %", ascending=False),
-                use_container_width=True
-            )
+            st.dataframe(bloque.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
 
-            st.bar_chart(bloque.set_index("Ticker")["Valor Actual €"])
-
-    # ==============================
-    # 9️⃣ BLOQUE ETFs
-    # ==============================
+    # ETFs
     st.header("📊 ETFs")
     etfs = df[df["TIPO"] == "ETF"]
 
@@ -180,11 +139,8 @@ if uploaded_file is not None:
         col2.metric("Rentabilidad ETFs", f"{rent:.2f} %")
 
         st.dataframe(etfs.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
-        st.bar_chart(etfs.set_index("Ticker")["Valor Actual €"])
 
-    # ==============================
-    # 🔟 BLOQUE FONDOS
-    # ==============================
+    # FONDOS
     st.header("🏦 FONDOS")
     fondos = df[df["TIPO"] == "FONDO"]
 
@@ -198,7 +154,6 @@ if uploaded_file is not None:
         col2.metric("Rentabilidad Fondos", f"{rent:.2f} %")
 
         st.dataframe(fondos.sort_values("Rentabilidad %", ascending=False), use_container_width=True)
-        st.bar_chart(fondos.set_index("IDENTIFICADOR")["Valor Actual €"])
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
