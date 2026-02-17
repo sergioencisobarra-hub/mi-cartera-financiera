@@ -12,6 +12,10 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
+    # Eliminar filas donde IDENTIFICADOR esté vacío o mal alineado
+    df = df[df["IDENTIFICADOR"].notna()]
+    df = df[df["IDENTIFICADOR"] != df["TIPO"]]
+
     # Forzar numéricos
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
@@ -26,28 +30,27 @@ if uploaded_file is not None:
 
     precios_actuales = []
 
+    def convertir_ticker(t):
+        if t.startswith("BME:"):
+            return t.split(":")[1] + ".MC"
+        if t.startswith("LON:"):
+            return t.split(":")[1] + ".L"
+        if t.startswith("ETR:") or t.startswith("etr:") or t.startswith("vie:"):
+            return t.split(":")[1] + ".DE"
+        if t.startswith("AMS:"):
+            return t.split(":")[1] + ".AS"
+        if t.startswith("epa:"):
+            return t.split(":")[1] + ".PA"
+        if t.startswith("NYSE:") or t.startswith("nyse:"):
+            return t.split(":")[1]
+        if t.startswith("NASDAQ:"):
+            return t.split(":")[1]
+        return t
+
     for index, row in df.iterrows():
 
         identificador_original = str(row["IDENTIFICADOR"]).strip()
         tipo = str(row["TIPO"]).upper()
-
-        # Convertir identificador a formato Yahoo si es ACCION o ETF
-        def convertir_ticker(t):
-            if t.startswith("BME:"):
-                return t.split(":")[1] + ".MC"
-            if t.startswith("LON:"):
-                return t.split(":")[1] + ".L"
-            if t.startswith("ETR:") or t.startswith("etr:") or t.startswith("vie:"):
-                return t.split(":")[1] + ".DE"
-            if t.startswith("AMS:"):
-                return t.split(":")[1] + ".AS"
-            if t.startswith("epa:"):
-                return t.split(":")[1] + ".PA"
-            if t.startswith("NYSE:") or t.startswith("nyse:"):
-                return t.split(":")[1]
-            if t.startswith("NASDAQ:"):
-                return t.split(":")[1]
-            return t
 
         identificador = convertir_ticker(identificador_original).upper()
 
@@ -58,24 +61,17 @@ if uploaded_file is not None:
 
             precio = float(datos["Close"].iloc[-1])
 
-            # ACCIONES y ETFs
             if tipo in ["ACCION", "ETF"]:
 
-                # UK (GBP)
                 if identificador.endswith(".L"):
                     if precio > 100:
                         precio = precio / 100
                     precio = (precio * gbpusd) / eurusd
 
-                # USA (USD)
                 elif "." not in identificador:
                     precio = precio / eurusd
 
-                # Europa ya en EUR
-
-            # FONDOS
             elif tipo == "FONDO":
-                # Si estuviera en USD
                 if "." not in identificador:
                     precio = precio / eurusd
 
@@ -87,18 +83,25 @@ if uploaded_file is not None:
 
     df["Precio Actual €"] = precios_actuales
 
-    # Limpiar filas inválidas
     df = df.dropna(subset=["ACCIONES", "PRECIO TOTAL", "Precio Actual €"])
 
-    # Cálculos financieros
+    if df.empty:
+        st.error("No hay datos válidos para calcular.")
+        st.stop()
+
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
+
+    total_inicial = float(df["Inversión Inicial €"].sum())
+    total_actual = float(df["Valor Actual €"].sum())
+
+    if total_inicial == 0:
+        st.error("La inversión inicial total es 0. Revisa el Excel.")
+        st.stop()
 
     df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
     df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
 
-    total_inicial = float(df["Inversión Inicial €"].sum())
-    total_actual = float(df["Valor Actual €"].sum())
     rentabilidad_total = ((total_actual - total_inicial) / total_inicial) * 100
 
     st.divider()
