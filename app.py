@@ -16,7 +16,7 @@ if uploaded_file is not None:
     # Quinta columna = ticker
     df["Ticker_Original"] = df.iloc[:, 4].astype(str)
 
-    # Convertir a formato Yahoo
+    # Conversión a formato Yahoo Finance
     def convertir_ticker(t):
         t = t.strip()
         if t.startswith("BME:"):
@@ -37,50 +37,43 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["Ticker_Original"].apply(convertir_ticker).str.upper()
 
-    st.write("Tickers convertidos:", df["Ticker"].tolist())
+    st.subheader("Descargando tipos de cambio...")
 
-    precios_actuales = []
-    tickers_validos = []
-
-    # Descargar tipo de cambio primero
     try:
-        eurusd = yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1]
-        eurgbp = yf.download("EURGBP=X", period="1d", progress=False)["Close"].iloc[-1]
+        eurusd = float(yf.download("EURUSD=X", period="1d", progress=False)["Close"].iloc[-1])
+        eurgbp = float(yf.download("EURGBP=X", period="1d", progress=False)["Close"].iloc[-1])
     except:
         st.error("No se pudieron descargar tipos de cambio.")
         st.stop()
 
-    st.write("EURUSD:", eurusd)
-    st.write("EURGBP:", eurgbp)
+    precios_actuales = []
 
-    st.subheader("Descargando precios...")
+    st.subheader("Descargando precios de mercado...")
 
     for t in df["Ticker"]:
         try:
             datos = yf.download(t, period="1d", progress=False)
+
             if datos.empty:
                 raise Exception("Sin datos")
 
-            precio = datos["Close"].iloc[-1]
+            precio = float(datos["Close"].iloc[-1])
 
-            # Convertir divisa
-            if t.endswith(".L"):  # Reino Unido (GBP)
+            # Conversión divisa
+            if t.endswith(".L"):  # GBP
                 precio = precio / eurgbp
-
-            elif "." not in t:  # USA (USD)
+            elif "." not in t:  # USD
                 precio = precio / eurusd
 
             precios_actuales.append(precio)
-            tickers_validos.append(True)
 
         except:
             st.warning(f"No se pudo obtener precio para {t}")
             precios_actuales.append(None)
-            tickers_validos.append(False)
 
     df["Precio Actual €"] = precios_actuales
 
-    # Eliminar los que no tengan precio
+    # Eliminar posiciones sin precio
     df = df.dropna(subset=["Precio Actual €"])
 
     if df.empty:
@@ -88,14 +81,21 @@ if uploaded_file is not None:
         st.stop()
 
     # Cálculos financieros
+    df["Precio Actual €"] = pd.to_numeric(df["Precio Actual €"], errors="coerce")
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
-    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
-    df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
 
-    total_inicial = df["Inversión Inicial €"].sum()
-    total_actual = df["Valor Actual €"].sum()
-    rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
+    df["Valor Actual €"] = pd.to_numeric(df["Valor Actual €"], errors="coerce")
+    df["Inversión Inicial €"] = pd.to_numeric(df["Inversión Inicial €"], errors="coerce")
+
+    df = df.dropna(subset=["Valor Actual €", "Inversión Inicial €"])
+
+    total_inicial = float(df["Inversión Inicial €"].sum())
+    total_actual = float(df["Valor Actual €"].sum())
+    rentabilidad_total = ((total_actual - total_inicial) / total_inicial) * 100
+
+    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
+    df["Rentabilidad %"] = (df["Rentabilidad €"] / df["Inversión Inicial €"]) * 100
 
     st.divider()
 
