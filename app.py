@@ -12,9 +12,6 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    df = df[df["IDENTIFICADOR"].notna()]
-    df = df[df["IDENTIFICADOR"] != df["TIPO"]]
-
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
@@ -46,31 +43,27 @@ if uploaded_file is not None:
     for index, row in df.iterrows():
 
         ticker = row["Ticker"]
-        tipo = row["TIPO"]
+        divisa = row["DIVISA"]
 
         try:
             ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(period="1d")
 
-            # ACCION / ETF → fast_info
-            if tipo in ["ACCION", "ETF"]:
-                precio = ticker_obj.fast_info.get("lastPrice", None)
+            if hist.empty:
+                raise Exception("Sin datos")
 
-            # FONDO → usar history (NAV suele estar aquí)
-            else:
-                hist = ticker_obj.history(period="1d")
-                if hist.empty:
-                    raise Exception("Sin datos")
-                precio = float(hist["Close"].iloc[-1])
+            precio = float(hist["Close"].iloc[-1])
 
-            if precio is None:
-                raise Exception("Sin precio")
+            # Conversión explícita según DIVISA
+            if divisa == "USD":
+                precio = precio / eurusd
 
-            # Conversión divisa SOLO por sufijo
-            if ticker.endswith(".L"):
+            elif divisa == "GBP":
+                # Yahoo UK devuelve en pence
+                precio = precio / 100
                 precio = (precio * gbpusd) / eurusd
 
-            elif "." not in ticker:
-                precio = precio / eurusd
+            # EUR no se toca
 
             precios.append(precio)
 
@@ -79,11 +72,7 @@ if uploaded_file is not None:
             precios.append(None)
 
     df["Precio Actual €"] = precios
-    df = df.dropna(subset=["ACCIONES", "PRECIO TOTAL", "Precio Actual €"])
-
-    if df.empty:
-        st.error("No hay datos válidos.")
-        st.stop()
+    df = df.dropna(subset=["Precio Actual €"])
 
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Inversión Inicial €"] = df["PRECIO TOTAL"]
@@ -93,15 +82,15 @@ if uploaded_file is not None:
 
     total_inicial = df["Inversión Inicial €"].sum()
     total_actual = df["Valor Actual €"].sum()
-
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
     st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
 
     st.dataframe(
         df[[
-            "Ticker",
+            "EMPRESA",
             "TIPO",
+            "DIVISA",
             "ACCIONES",
             "Precio Actual €",
             "Valor Actual €",
