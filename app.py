@@ -3,52 +3,16 @@ import pandas as pd
 import yfinance as yf
 import plotly.express as px
 
-st.set_page_config(page_title="Cartera Premium", layout="wide")
-
-# =========================
-# ESTILO PREMIUM
-# =========================
-st.markdown("""
-<style>
-
-html, body, [class*="css"]  {
-    background-color: #0b1220;
-    color: #e5e7eb;
-    font-family: 'Inter', sans-serif;
-}
-
-.block-container {
-    padding-top: 2rem;
-}
-
-.premium-card {
-    background: linear-gradient(145deg, #111827, #0f172a);
-    padding: 25px;
-    border-radius: 18px;
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: 0px 10px 30px rgba(0,0,0,0.6);
-    text-align: center;
-}
-
-.metric-value {
-    font-size: 28px;
-    font-weight: 600;
-}
-
-.metric-label {
-    font-size: 14px;
-    opacity: 0.7;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📈 Cartera – Edición Premium")
+st.set_page_config(page_title="Cartera", layout="wide")
+st.title("📊 Mi Cartera")
 
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
+    # =========================
+    # CARGA Y LIMPIEZA
+    # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
@@ -56,6 +20,9 @@ if uploaded_file is not None:
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
+    # =========================
+    # CONVERSIÓN TICKERS
+    # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -78,7 +45,7 @@ if uploaded_file is not None:
 
     precios = []
 
-    for index, row in df.iterrows():
+    for _, row in df.iterrows():
         ticker = row["Ticker"]
         divisa = str(row["DIVISA"]).upper()
 
@@ -99,112 +66,178 @@ if uploaded_file is not None:
     df["Precio Actual €"] = precios
     df = df.dropna(subset=["Precio Actual €"])
 
+    # =========================
+    # CÁLCULOS
+    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Diferencia €"] = df["Valor Actual €"] - df["PRECIO TOTAL"]
     df["Rentabilidad %"] = df["Diferencia €"] / df["PRECIO TOTAL"] * 100
 
-    total_actual = df["Valor Actual €"].sum()
     total_inicial = df["PRECIO TOTAL"].sum()
+    total_actual = df["Valor Actual €"].sum()
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
+
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
     # =========================
-    # MÉTRICAS PREMIUM
+    # CARDS PRINCIPALES
     # =========================
     col1, col2, col3 = st.columns(3)
+    col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
+    col2.metric("Valor Actual", f"{total_actual:,.2f} €")
+    col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
 
-    col1.markdown(f"""
-    <div class="premium-card">
-        <div class="metric-value">{total_actual:,.0f} €</div>
-        <div class="metric-label">Valor Total</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    color_rent = "#00ff99" if rentabilidad_total > 0 else "#ff4d6d"
-
-    col2.markdown(f"""
-    <div class="premium-card">
-        <div class="metric-value" style="color:{color_rent}">
-            {rentabilidad_total:.2f}%
-        </div>
-        <div class="metric-label">Rentabilidad Total</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col3.markdown(f"""
-    <div class="premium-card">
-        <div class="metric-value">{len(df)}</div>
-        <div class="metric-label">Posiciones</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
 
     # =========================
-    # DONUT MODERNO
+    # VISIÓN MACRO
     # =========================
-    st.subheader("Distribución por Tipo")
+    col_tipo, col_region = st.columns(2)
 
-    tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
+    # Donut por tipo
+    with col_tipo:
+        st.subheader("Distribución por Tipo")
+        tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
+        fig_tipo = px.pie(
+            tipo_chart,
+            names="TIPO",
+            values="Valor Actual €",
+            hole=0.6
+        )
+        fig_tipo.update_layout(showlegend=False)
+        st.plotly_chart(fig_tipo, use_container_width=True)
 
-    fig_tipo = px.pie(
-        tipo_chart,
-        names="TIPO",
-        values="Valor Actual €",
-        hole=0.65,
-        template="plotly_dark",
-        color_discrete_sequence=["#6366f1", "#10b981", "#f59e0b"]
-    )
+    # Donut por región (solo acciones)
+    with col_region:
+        st.subheader("Distribución por Región (Acciones)")
 
-    fig_tipo.update_traces(textposition="outside", textinfo="percent+label")
-    fig_tipo.update_layout(showlegend=False)
+        acciones = df[df["TIPO"] == "ACCION"]
 
-    st.plotly_chart(fig_tipo, use_container_width=True)
+        def clasificar_region(ticker):
+            if ticker.endswith(".MC"):
+                return "España"
+            if ticker.endswith(".L"):
+                return "UK"
+            if ticker.endswith(".DE") or ticker.endswith(".AS") or ticker.endswith(".PA"):
+                return "Europa"
+            if "." not in ticker:
+                return "USA"
+            return "Otros"
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        acciones["REGION"] = acciones["Ticker"].apply(clasificar_region)
+
+        region_chart = acciones.groupby("REGION")["Valor Actual €"].sum().reset_index()
+
+        fig_region = px.pie(
+            region_chart,
+            names="REGION",
+            values="Valor Actual €",
+            hole=0.6
+        )
+
+        fig_region.update_layout(showlegend=False)
+        st.plotly_chart(fig_region, use_container_width=True)
+
+    st.divider()
 
     # =========================
-    # TABLA PREMIUM
+    # FUNCIÓN BLOQUES
     # =========================
-    st.subheader("Detalle de posiciones")
+    def mostrar_bloque(data, titulo):
 
-    tabla = df[[
-        "EMPRESA",
-        "ACCIONES",
-        "PRECIO TOTAL",
-        "Precio Actual €",
-        "Diferencia €",
-        "Rentabilidad %",
-        "Peso %"
-    ]].copy()
+        if data.empty:
+            return
 
-    tabla.rename(columns={
-        "PRECIO TOTAL": "Precio Compra Total €"
-    }, inplace=True)
+        with st.expander(titulo, expanded=True):
 
-    def color_dif(val):
-        return "color: #00ff99" if val > 0 else "color: #ff4d6d"
+            valor = data["Valor Actual €"].sum()
+            inversion = data["PRECIO TOTAL"].sum()
+            rent = (valor - inversion) / inversion * 100
+            peso_bloque = valor / total_actual * 100
+            resto = 100 - peso_bloque
 
-    def color_peso(val):
-        if val > 5:
-            return "color: #ff4d6d"
-        elif val > 3:
-            return "color: #f59e0b"
-        return ""
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Valor del bloque", f"{valor:,.2f} €")
+            col2.metric("Rentabilidad del bloque", f"{rent:.2f} %")
+            col3.metric("% sobre la cartera", f"{peso_bloque:.2f} %")
 
-    styled = tabla.style \
-        .applymap(color_dif, subset=["Diferencia €", "Rentabilidad %"]) \
-        .applymap(color_peso, subset=["Peso %"]) \
-        .bar(subset=["Peso %"], color="#6366f1") \
-        .format({
-            "Precio Compra Total €": "{:,.2f}",
-            "Precio Actual €": "{:,.2f}",
-            "Diferencia €": "{:,.2f}",
-            "Rentabilidad %": "{:.2f}",
-            "Peso %": "{:.2f}"
-        })
+            st.markdown("---")
 
-    st.dataframe(styled, use_container_width=True)
+            col_bar, col_pie = st.columns([4, 2])
+
+            with col_bar:
+                fig_bar = px.bar(
+                    data.sort_values("Peso %"),
+                    x="Peso %",
+                    y="EMPRESA",
+                    orientation="h",
+                    height=350
+                )
+                fig_bar.update_layout(margin=dict(l=10, r=10, t=10, b=10))
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+            with col_pie:
+                pie_data = pd.DataFrame({
+                    "Segmento": ["Bloque", "Resto cartera"],
+                    "Porcentaje": [peso_bloque, resto]
+                })
+
+                fig_pie = px.pie(
+                    pie_data,
+                    names="Segmento",
+                    values="Porcentaje",
+                    hole=0.5
+                )
+
+                fig_pie.update_layout(showlegend=False)
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            st.dataframe(
+                data[[
+                    "EMPRESA",
+                    "ACCIONES",
+                    "PRECIO TOTAL",
+                    "Precio Actual €",
+                    "Diferencia €",
+                    "Rentabilidad %",
+                    "Peso %"
+                ]].sort_values("Peso %", ascending=False),
+                use_container_width=True
+            )
+
+    # =========================
+    # ACCIONES POR REGIÓN
+    # =========================
+    acciones = df[df["TIPO"] == "ACCION"]
+
+    esp = acciones[acciones["Ticker"].str.endswith(".MC")]
+    uk = acciones[acciones["Ticker"].str.endswith(".L")]
+    eur = acciones[acciones["Ticker"].str.endswith((".DE", ".AS", ".PA"))]
+    usa = acciones[~acciones["Ticker"].str.contains(r"\.")]
+
+    st.header("📈 Acciones")
+    mostrar_bloque(esp, "🇪🇸 España")
+    mostrar_bloque(eur, "🇪🇺 Europa")
+    mostrar_bloque(usa, "🇺🇸 USA")
+    mostrar_bloque(uk, "🇬🇧 UK")
+
+    st.divider()
+
+    # =========================
+    # ETFs
+    # =========================
+    st.header("📊 ETFs")
+    etfs = df[df["TIPO"] == "ETF"]
+    mostrar_bloque(etfs, "ETFs")
+
+    st.divider()
+
+    # =========================
+    # Fondos
+    # =========================
+    st.header("🏦 Fondos de Inversión")
+    fondos = df[df["TIPO"] == "FONDO"]
+    mostrar_bloque(fondos, "Fondos")
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
