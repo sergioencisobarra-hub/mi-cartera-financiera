@@ -3,33 +3,47 @@ import pandas as pd
 import yfinance as yf
 import plotly.express as px
 
-st.set_page_config(page_title="Mi Cartera", layout="wide")
+st.set_page_config(page_title="Cartera Premium", layout="wide")
 
 # =========================
-# ESTILO OSCURO GLOBAL
+# ESTILO PREMIUM
 # =========================
 st.markdown("""
 <style>
+
 html, body, [class*="css"]  {
-    background-color: #0f172a;
-    color: white;
+    background-color: #0b1220;
+    color: #e5e7eb;
+    font-family: 'Inter', sans-serif;
 }
 
 .block-container {
     padding-top: 2rem;
 }
 
-.metric-card {
-    background: linear-gradient(145deg, #1e293b, #0f172a);
-    padding: 20px;
-    border-radius: 15px;
+.premium-card {
+    background: linear-gradient(145deg, #111827, #0f172a);
+    padding: 25px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 0px 10px 30px rgba(0,0,0,0.6);
     text-align: center;
-    box-shadow: 0px 6px 20px rgba(0,0,0,0.4);
 }
+
+.metric-value {
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.metric-label {
+    font-size: 14px;
+    opacity: 0.7;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌙 Dashboard Oscuro de Cartera")
+st.title("📈 Cartera – Edición Premium")
 
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
@@ -79,7 +93,6 @@ if uploaded_file is not None:
                 precio = (precio * gbpusd) / eurusd
 
             precios.append(precio)
-
         except:
             precios.append(None)
 
@@ -96,39 +109,41 @@ if uploaded_file is not None:
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
     # =========================
-    # MÉTRICAS GRANDES
+    # MÉTRICAS PREMIUM
     # =========================
     col1, col2, col3 = st.columns(3)
 
     col1.markdown(f"""
-    <div class="metric-card">
-        <h2>{total_actual:,.0f} €</h2>
-        <p>Valor Total</p>
+    <div class="premium-card">
+        <div class="metric-value">{total_actual:,.0f} €</div>
+        <div class="metric-label">Valor Total</div>
     </div>
     """, unsafe_allow_html=True)
 
-    color_rent = "#00ff88" if rentabilidad_total > 0 else "#ff4d4d"
+    color_rent = "#00ff99" if rentabilidad_total > 0 else "#ff4d6d"
 
     col2.markdown(f"""
-    <div class="metric-card">
-        <h2 style="color:{color_rent}">{rentabilidad_total:.2f}%</h2>
-        <p>Rentabilidad Total</p>
+    <div class="premium-card">
+        <div class="metric-value" style="color:{color_rent}">
+            {rentabilidad_total:.2f}%
+        </div>
+        <div class="metric-label">Rentabilidad Total</div>
     </div>
     """, unsafe_allow_html=True)
 
     col3.markdown(f"""
-    <div class="metric-card">
-        <h2>{len(df)}</h2>
-        <p>Posiciones</p>
+    <div class="premium-card">
+        <div class="metric-value">{len(df)}</div>
+        <div class="metric-label">Posiciones</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # =========================
-    # DONUT POR TIPO
+    # DONUT MODERNO
     # =========================
-    st.subheader("📊 Distribución por Tipo")
+    st.subheader("Distribución por Tipo")
 
     tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
 
@@ -136,19 +151,22 @@ if uploaded_file is not None:
         tipo_chart,
         names="TIPO",
         values="Valor Actual €",
-        hole=0.6,
+        hole=0.65,
         template="plotly_dark",
-        color_discrete_sequence=px.colors.sequential.Plasma
+        color_discrete_sequence=["#6366f1", "#10b981", "#f59e0b"]
     )
+
+    fig_tipo.update_traces(textposition="outside", textinfo="percent+label")
+    fig_tipo.update_layout(showlegend=False)
 
     st.plotly_chart(fig_tipo, use_container_width=True)
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # =========================
-    # TABLA
+    # TABLA PREMIUM
     # =========================
-    st.subheader("📋 Detalle de posiciones")
+    st.subheader("Detalle de posiciones")
 
     tabla = df[[
         "EMPRESA",
@@ -165,15 +183,19 @@ if uploaded_file is not None:
     }, inplace=True)
 
     def color_dif(val):
-        return "color: #00ff88" if val > 0 else "color: #ff4d4d"
+        return "color: #00ff99" if val > 0 else "color: #ff4d6d"
 
     def color_peso(val):
-        return "color: #ff4d4d" if val > 3 else ""
+        if val > 5:
+            return "color: #ff4d6d"
+        elif val > 3:
+            return "color: #f59e0b"
+        return ""
 
     styled = tabla.style \
         .applymap(color_dif, subset=["Diferencia €", "Rentabilidad %"]) \
         .applymap(color_peso, subset=["Peso %"]) \
-        .bar(subset=["Peso %"], color="#1f77ff") \
+        .bar(subset=["Peso %"], color="#6366f1") \
         .format({
             "Precio Compra Total €": "{:,.2f}",
             "Precio Actual €": "{:,.2f}",
