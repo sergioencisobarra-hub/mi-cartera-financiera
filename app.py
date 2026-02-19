@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
-import numpy as np
 
 st.set_page_config(page_title="Mi Cartera", layout="wide")
-st.title("🚀 Dashboard de Cartera – Control de Riesgo")
+
+st.title("🚀 Dashboard de Cartera")
 
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
@@ -21,6 +21,9 @@ if uploaded_file is not None:
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
+    # =========================
+    # CONVERSIÓN TICKER
+    # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -75,36 +78,30 @@ if uploaded_file is not None:
     total_actual = df["Valor Actual €"].sum()
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
-    df = df.sort_values("Peso %", ascending=False).reset_index(drop=True)
-    df["Ranking"] = df.index + 1
-
     # =========================
-    # MÉTRICAS DE CONCENTRACIÓN
+    # DONUT POR TIPO
     # =========================
-    top3 = df["Peso %"].head(3).sum()
-    mayor = df["Peso %"].max()
-    hhi = np.sum((df["Peso %"])**2)
+    st.subheader("📊 Distribución por Tipo")
+    tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
 
-    col1, col2, col3 = st.columns(3)
+    fig_tipo = px.pie(
+        tipo_chart,
+        names="TIPO",
+        values="Valor Actual €",
+        hole=0.5,
+        color_discrete_sequence=px.colors.sequential.Tealgrn
+    )
 
-    col1.metric("Top 3 posiciones (%)", f"{top3:.2f}%")
-    col2.metric("Mayor posición (%)", f"{mayor:.2f}%")
-    col3.metric("Índice HHI", f"{hhi:.0f}")
-
-    if hhi > 2500:
-        st.error("⚠ Alta concentración de cartera")
-    elif hhi > 1500:
-        st.warning("⚠ Concentración moderada")
-    else:
-        st.success("✔ Cartera diversificada")
+    st.plotly_chart(fig_tipo, use_container_width=True)
 
     st.divider()
 
     # =========================
-    # TABLA FINAL
+    # TABLA REORDENADA
     # =========================
+    st.subheader("📋 Detalle de posiciones")
+
     tabla = df[[
-        "Ranking",
         "EMPRESA",
         "ACCIONES",
         "PRECIO TOTAL",
@@ -118,22 +115,22 @@ if uploaded_file is not None:
         "PRECIO TOTAL": "Precio Compra Total €"
     }, inplace=True)
 
+    # =========================
+    # ESTILOS
+    # =========================
     def color_diferencia(val):
-        return "color: #00cc66" if val > 0 else "color: #ff4d4d"
+        return "color: #00ff88" if val > 0 else "color: #ff4d4d"
+
+    def color_rentabilidad(val):
+        return "color: #00ff88" if val > 0 else "color: #ff4d4d"
 
     def color_peso(val):
-        if val > 10:
-            return "color: #ff0000"
-        elif val > 5:
-            return "color: #ff8800"
-        elif val > 3:
-            return "color: #ffaa00"
-        return ""
+        return "color: #ff4d4d" if val > 3 else "color: white"
 
     styled = tabla.style \
-        .applymap(color_diferencia, subset=["Diferencia €", "Rentabilidad %"]) \
+        .applymap(color_diferencia, subset=["Diferencia €"]) \
+        .applymap(color_rentabilidad, subset=["Rentabilidad %"]) \
         .applymap(color_peso, subset=["Peso %"]) \
-        .bar(subset=["Peso %"], color="#4da6ff") \
         .format({
             "Precio Compra Total €": "{:,.2f}",
             "Precio Actual €": "{:,.2f}",
