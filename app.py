@@ -2,68 +2,64 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Dashboard Cartera", layout="wide")
-st.title("📊 Dashboard Visual de mi Cartera")
+st.set_page_config(page_title="Mi Cartera", layout="wide")
+
+st.markdown("""
+    <style>
+    .metric-card {
+        background-color: #111827;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        color: white;
+        box-shadow: 0px 4px 15px rgba(0,0,0,0.2);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🚀 Dashboard Dinámico de Cartera")
 
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
-    # =========================
-    # CARGA Y LIMPIEZA
-    # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
     df = df[df["IDENTIFICADOR"].notna()]
-    df = df[df["IDENTIFICADOR"] != df["TIPO"]]
-
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
-    # =========================
-    # CONVERSIÓN A YAHOO
-    # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
         if t.startswith("LON:"):
             return t.split(":")[1] + ".L"
-        if t.startswith("ETR:") or t.startswith("etr:") or t.startswith("vie:"):
+        if t.startswith("ETR:") or t.startswith("vie:"):
             return t.split(":")[1] + ".DE"
         if t.startswith("AMS:"):
             return t.split(":")[1] + ".AS"
         if t.startswith("epa:"):
             return t.split(":")[1] + ".PA"
-        if t.startswith("NYSE:") or t.startswith("nyse:"):
-            return t.split(":")[1]
-        if t.startswith("NASDAQ:"):
+        if t.startswith("NYSE:") or t.startswith("NASDAQ:"):
             return t.split(":")[1]
         return t
 
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
-    # =========================
-    # TIPOS DE CAMBIO
-    # =========================
     eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
     gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
-    precios_eur = []
+    precios = []
 
     for index, row in df.iterrows():
-
         ticker = row["Ticker"]
         divisa = str(row["DIVISA"]).upper()
 
         try:
-            ticker_obj = yf.Ticker(ticker)
-            hist = ticker_obj.history(period="1d")
-
-            if hist.empty:
-                raise Exception("Sin datos")
-
+            hist = yf.Ticker(ticker).history(period="1d")
             precio = float(hist["Close"].iloc[-1])
 
             if divisa == "USD":
@@ -72,102 +68,96 @@ if uploaded_file is not None:
                 precio = precio / 100
                 precio = (precio * gbpusd) / eurusd
 
-            precios_eur.append(precio)
+            precios.append(precio)
 
         except:
-            st.warning(f"No se pudo obtener precio para {ticker}")
-            precios_eur.append(None)
+            precios.append(None)
 
-    df["Precio Actual €"] = precios_eur
+    df["Precio Actual €"] = precios
     df = df.dropna(subset=["Precio Actual €"])
 
-    # =========================
-    # CÁLCULOS
-    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
-    df["Inversión Inicial €"] = df["PRECIO TOTAL"]
-    df["Rentabilidad €"] = df["Valor Actual €"] - df["Inversión Inicial €"]
-    df["Rentabilidad %"] = df["Rentabilidad €"] / df["Inversión Inicial €"] * 100
+    df["Rentabilidad %"] = (df["Valor Actual €"] - df["PRECIO TOTAL"]) / df["PRECIO TOTAL"] * 100
 
     total_actual = df["Valor Actual €"].sum()
-    total_inicial = df["Inversión Inicial €"].sum()
+    total_inicial = df["PRECIO TOTAL"].sum()
     rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
-
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
-    # =========================
-    # MÉTRICA GENERAL
-    # =========================
+    # ==============================
+    # MÉTRICAS GRANDES
+    # ==============================
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.markdown(f'<div class="metric-card"><h2>{total_actual:,.0f} €</h2><p>Valor Total</p></div>', unsafe_allow_html=True)
+    col2.markdown(f'<div class="metric-card"><h2>{rentabilidad_total:.2f}%</h2><p>Rentabilidad Total</p></div>', unsafe_allow_html=True)
+    col3.markdown(f'<div class="metric-card"><h2>{len(df)}</h2><p>Posiciones</p></div>', unsafe_allow_html=True)
+    col4.markdown(f'<div class="metric-card"><h2>{df["Peso %"].max():.2f}%</h2><p>Mayor Peso</p></div>', unsafe_allow_html=True)
+
     st.divider()
-    st.metric("Rentabilidad Total Cartera", f"{rentabilidad_total:.2f} %")
-    st.divider()
 
-    # =========================
-    # CLASIFICACIÓN REGIÓN
-    # =========================
-    def clasificar_region(ticker):
-        if ticker.endswith(".MC"):
-            return "España"
-        if ticker.endswith(".L"):
-            return "UK"
-        if ticker.endswith(".DE") or ticker.endswith(".AS") or ticker.endswith(".PA"):
-            return "Europa"
-        if "." not in ticker:
-            return "USA"
-        return "Otros"
-
-    df["REGION"] = df["Ticker"].apply(clasificar_region)
-
-    # =========================
-    # GRÁFICO POR TIPO
-    # =========================
+    # ==============================
+    # DONUT POR TIPO
+    # ==============================
     st.subheader("📊 Distribución por Tipo")
     tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
-    fig_tipo = px.pie(tipo_chart, names="TIPO", values="Valor Actual €", hole=0.4)
+
+    fig_tipo = px.pie(
+        tipo_chart,
+        names="TIPO",
+        values="Valor Actual €",
+        hole=0.5,
+        color_discrete_sequence=px.colors.sequential.Tealgrn
+    )
+
     st.plotly_chart(fig_tipo, use_container_width=True)
 
-    # =========================
-    # GRÁFICO POR REGIÓN (solo acciones)
-    # =========================
-    st.subheader("🌍 Distribución por Región (Acciones)")
-    acciones = df[df["TIPO"] == "ACCION"]
-    region_chart = acciones.groupby("REGION")["Valor Actual €"].sum().reset_index()
-    fig_region = px.pie(region_chart, names="REGION", values="Valor Actual €", hole=0.4)
-    st.plotly_chart(fig_region, use_container_width=True)
+    # ==============================
+    # GRÁFICO BURBUJA
+    # ==============================
+    st.subheader("🎯 Peso vs Rentabilidad")
 
-    # =========================
-    # PESO EN CARTERA
-    # =========================
-    st.subheader("📈 Peso de cada activo en la cartera")
+    fig_bubble = px.scatter(
+        df,
+        x="Peso %",
+        y="Rentabilidad %",
+        size="Valor Actual €",
+        color="Rentabilidad %",
+        hover_name="EMPRESA",
+        color_continuous_scale="RdYlGn"
+    )
 
-    df_sorted = df.sort_values("Peso %", ascending=True)
+    st.plotly_chart(fig_bubble, use_container_width=True)
 
-    fig_peso = px.bar(
+    # ==============================
+    # BARRAS HORIZONTALES
+    # ==============================
+    st.subheader("📈 Peso en Cartera")
+
+    df_sorted = df.sort_values("Peso %")
+
+    fig_bar = px.bar(
         df_sorted,
         x="Peso %",
         y="EMPRESA",
         orientation="h",
         color="Rentabilidad %",
-        color_continuous_scale=["red", "yellow", "green"]
+        color_continuous_scale="RdYlGn"
     )
 
-    st.plotly_chart(fig_peso, use_container_width=True)
+    st.plotly_chart(fig_bar, use_container_width=True)
 
-    # =========================
-    # TABLA FINAL CON COLORES
-    # =========================
-    st.subheader("📋 Detalle completo")
+    # ==============================
+    # TABLA ESTILIZADA
+    # ==============================
+    st.subheader("📋 Detalle")
 
-    def color_rentabilidad(val):
-        if val > 0:
-            return "color: green"
-        elif val < 0:
-            return "color: red"
-        else:
-            return "color: white"
+    def color_rent(val):
+        return "color: #00ff88" if val > 0 else "color: #ff4d4d"
 
     st.dataframe(
-        df.style.applymap(color_rentabilidad, subset=["Rentabilidad %"]),
+        df.style.applymap(color_rent, subset=["Rentabilidad %"]),
         use_container_width=True
     )
 
