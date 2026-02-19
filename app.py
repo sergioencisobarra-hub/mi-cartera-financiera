@@ -94,47 +94,32 @@ if uploaded_file is not None:
     # =========================
     col_tipo, col_region = st.columns(2)
 
-    # Donut por tipo
     with col_tipo:
         st.subheader("Distribución por Tipo")
         tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
-        fig_tipo = px.pie(
-            tipo_chart,
-            names="TIPO",
-            values="Valor Actual €",
-            hole=0.6
-        )
+        fig_tipo = px.pie(tipo_chart, names="TIPO", values="Valor Actual €", hole=0.6)
         fig_tipo.update_layout(showlegend=False)
         st.plotly_chart(fig_tipo, use_container_width=True)
 
-    # Donut por región (solo acciones)
     with col_region:
         st.subheader("Distribución por Región (Acciones)")
-
-        acciones = df[df["TIPO"] == "ACCION"]
+        acciones_tmp = df[df["TIPO"] == "ACCION"].copy()
 
         def clasificar_region(ticker):
             if ticker.endswith(".MC"):
                 return "España"
             if ticker.endswith(".L"):
                 return "UK"
-            if ticker.endswith(".DE") or ticker.endswith(".AS") or ticker.endswith(".PA"):
+            if ticker.endswith((".DE", ".AS", ".PA")):
                 return "Europa"
             if "." not in ticker:
                 return "USA"
             return "Otros"
 
-        acciones["REGION"] = acciones["Ticker"].apply(clasificar_region)
+        acciones_tmp["REGION"] = acciones_tmp["Ticker"].apply(clasificar_region)
+        region_chart = acciones_tmp.groupby("REGION")["Valor Actual €"].sum().reset_index()
 
-        region_chart = acciones.groupby("REGION")["Valor Actual €"].sum().reset_index()
-
-        fig_region = px.pie(
-            region_chart,
-            names="REGION",
-            values="Valor Actual €",
-            hole=0.6
-        )
-
+        fig_region = px.pie(region_chart, names="REGION", values="Valor Actual €", hole=0.6)
         fig_region.update_layout(showlegend=False)
         st.plotly_chart(fig_region, use_container_width=True)
 
@@ -178,38 +163,68 @@ if uploaded_file is not None:
 
             with col_pie:
                 pie_data = pd.DataFrame({
-                    "Segmento": ["Bloque", "Resto cartera"],
+                    "Segmento": ["Bloque", "Resto"],
                     "Porcentaje": [peso_bloque, resto]
                 })
-
-                fig_pie = px.pie(
-                    pie_data,
-                    names="Segmento",
-                    values="Porcentaje",
-                    hole=0.5
-                )
-
+                fig_pie = px.pie(pie_data, names="Segmento", values="Porcentaje", hole=0.5)
                 fig_pie.update_layout(showlegend=False)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-            st.dataframe(
-                data[[
-                    "EMPRESA",
-                    "ACCIONES",
-                    "PRECIO TOTAL",
-                    "Precio Actual €",
-                    "Diferencia €",
-                    "Rentabilidad %",
-                    "Peso %"
-                ]].sort_values("Peso %", ascending=False),
-                use_container_width=True
-            )
+            tabla = data[[
+                "EMPRESA",
+                "ACCIONES",
+                "PRECIO TOTAL",
+                "Precio Actual €",
+                "Diferencia €",
+                "Rentabilidad %",
+                "Peso %"
+            ]].sort_values("Peso %", ascending=False)
+
+            def estilo_rentabilidad(val):
+                if val >= 15:
+                    return "color: #0f5132; font-weight: bold; font-size: 110%; background-color: rgba(25,135,84,0.15);"
+                elif val > 0:
+                    return "color: #198754; font-weight: bold;"
+                elif val <= -10:
+                    return "color: #842029; font-weight: bold; background-color: rgba(220,53,69,0.15);"
+                elif val < 0:
+                    return "color: #dc3545; font-weight: bold;"
+                return ""
+
+            def estilo_diferencia(val):
+                if val > 0:
+                    return "color: #198754; font-weight: bold;"
+                elif val < 0:
+                    return "color: #dc3545; font-weight: bold;"
+                return ""
+
+            def estilo_peso(val):
+                if val > 10:
+                    return "color: #dc3545; font-weight: bold;"
+                elif val > 5:
+                    return "color: #fd7e14; font-weight: bold;"
+                elif val > 3:
+                    return "color: #ffc107;"
+                return ""
+
+            styled = tabla.style \
+                .applymap(estilo_rentabilidad, subset=["Rentabilidad %"]) \
+                .applymap(estilo_diferencia, subset=["Diferencia €"]) \
+                .applymap(estilo_peso, subset=["Peso %"]) \
+                .format({
+                    "PRECIO TOTAL": "{:,.2f}",
+                    "Precio Actual €": "{:,.2f}",
+                    "Diferencia €": "{:,.2f}",
+                    "Rentabilidad %": "{:.2f}",
+                    "Peso %": "{:.2f}"
+                })
+
+            st.dataframe(styled, use_container_width=True)
 
     # =========================
-    # ACCIONES POR REGIÓN
+    # BLOQUES
     # =========================
     acciones = df[df["TIPO"] == "ACCION"]
-
     esp = acciones[acciones["Ticker"].str.endswith(".MC")]
     uk = acciones[acciones["Ticker"].str.endswith(".L")]
     eur = acciones[acciones["Ticker"].str.endswith((".DE", ".AS", ".PA"))]
@@ -223,18 +238,12 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # =========================
-    # ETFs
-    # =========================
     st.header("📊 ETFs")
     etfs = df[df["TIPO"] == "ETF"]
     mostrar_bloque(etfs, "ETFs")
 
     st.divider()
 
-    # =========================
-    # Fondos
-    # =========================
     st.header("🏦 Fondos de Inversión")
     fondos = df[df["TIPO"] == "FONDO"]
     mostrar_bloque(fondos, "Fondos")
