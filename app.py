@@ -2,29 +2,18 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
-import plotly.graph_objects as go
+import numpy as np
 
 st.set_page_config(page_title="Mi Cartera", layout="wide")
-
-st.markdown("""
-    <style>
-    .metric-card {
-        background-color: #111827;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        color: white;
-        box-shadow: 0px 4px 15px rgba(0,0,0,0.2);
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("🚀 Dashboard Dinámico de Cartera")
+st.title("🚀 Dashboard de Cartera – Control de Riesgo")
 
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 if uploaded_file is not None:
 
+    # =========================
+    # CARGA
+    # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
@@ -76,90 +65,84 @@ if uploaded_file is not None:
     df["Precio Actual €"] = precios
     df = df.dropna(subset=["Precio Actual €"])
 
+    # =========================
+    # CÁLCULOS
+    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
-    df["Rentabilidad %"] = (df["Valor Actual €"] - df["PRECIO TOTAL"]) / df["PRECIO TOTAL"] * 100
+    df["Diferencia €"] = df["Valor Actual €"] - df["PRECIO TOTAL"]
+    df["Rentabilidad %"] = df["Diferencia €"] / df["PRECIO TOTAL"] * 100
 
     total_actual = df["Valor Actual €"].sum()
-    total_inicial = df["PRECIO TOTAL"].sum()
-    rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
-    # ==============================
-    # MÉTRICAS GRANDES
-    # ==============================
+    df = df.sort_values("Peso %", ascending=False).reset_index(drop=True)
+    df["Ranking"] = df.index + 1
 
-    col1, col2, col3, col4 = st.columns(4)
+    # =========================
+    # MÉTRICAS DE CONCENTRACIÓN
+    # =========================
+    top3 = df["Peso %"].head(3).sum()
+    mayor = df["Peso %"].max()
+    hhi = np.sum((df["Peso %"])**2)
 
-    col1.markdown(f'<div class="metric-card"><h2>{total_actual:,.0f} €</h2><p>Valor Total</p></div>', unsafe_allow_html=True)
-    col2.markdown(f'<div class="metric-card"><h2>{rentabilidad_total:.2f}%</h2><p>Rentabilidad Total</p></div>', unsafe_allow_html=True)
-    col3.markdown(f'<div class="metric-card"><h2>{len(df)}</h2><p>Posiciones</p></div>', unsafe_allow_html=True)
-    col4.markdown(f'<div class="metric-card"><h2>{df["Peso %"].max():.2f}%</h2><p>Mayor Peso</p></div>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Top 3 posiciones (%)", f"{top3:.2f}%")
+    col2.metric("Mayor posición (%)", f"{mayor:.2f}%")
+    col3.metric("Índice HHI", f"{hhi:.0f}")
+
+    if hhi > 2500:
+        st.error("⚠ Alta concentración de cartera")
+    elif hhi > 1500:
+        st.warning("⚠ Concentración moderada")
+    else:
+        st.success("✔ Cartera diversificada")
 
     st.divider()
 
-    # ==============================
-    # DONUT POR TIPO
-    # ==============================
-    st.subheader("📊 Distribución por Tipo")
-    tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
+    # =========================
+    # TABLA FINAL
+    # =========================
+    tabla = df[[
+        "Ranking",
+        "EMPRESA",
+        "ACCIONES",
+        "PRECIO TOTAL",
+        "Precio Actual €",
+        "Diferencia €",
+        "Rentabilidad %",
+        "Peso %"
+    ]].copy()
 
-    fig_tipo = px.pie(
-        tipo_chart,
-        names="TIPO",
-        values="Valor Actual €",
-        hole=0.5,
-        color_discrete_sequence=px.colors.sequential.Tealgrn
-    )
+    tabla.rename(columns={
+        "PRECIO TOTAL": "Precio Compra Total €"
+    }, inplace=True)
 
-    st.plotly_chart(fig_tipo, use_container_width=True)
+    def color_diferencia(val):
+        return "color: #00cc66" if val > 0 else "color: #ff4d4d"
 
-    # ==============================
-    # GRÁFICO BURBUJA
-    # ==============================
-    st.subheader("🎯 Peso vs Rentabilidad")
+    def color_peso(val):
+        if val > 10:
+            return "color: #ff0000"
+        elif val > 5:
+            return "color: #ff8800"
+        elif val > 3:
+            return "color: #ffaa00"
+        return ""
 
-    fig_bubble = px.scatter(
-        df,
-        x="Peso %",
-        y="Rentabilidad %",
-        size="Valor Actual €",
-        color="Rentabilidad %",
-        hover_name="EMPRESA",
-        color_continuous_scale="RdYlGn"
-    )
+    styled = tabla.style \
+        .applymap(color_diferencia, subset=["Diferencia €", "Rentabilidad %"]) \
+        .applymap(color_peso, subset=["Peso %"]) \
+        .bar(subset=["Peso %"], color="#4da6ff") \
+        .format({
+            "Precio Compra Total €": "{:,.2f}",
+            "Precio Actual €": "{:,.2f}",
+            "Diferencia €": "{:,.2f}",
+            "Rentabilidad %": "{:.2f}",
+            "Peso %": "{:.2f}"
+        })
 
-    st.plotly_chart(fig_bubble, use_container_width=True)
-
-    # ==============================
-    # BARRAS HORIZONTALES
-    # ==============================
-    st.subheader("📈 Peso en Cartera")
-
-    df_sorted = df.sort_values("Peso %")
-
-    fig_bar = px.bar(
-        df_sorted,
-        x="Peso %",
-        y="EMPRESA",
-        orientation="h",
-        color="Rentabilidad %",
-        color_continuous_scale="RdYlGn"
-    )
-
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-    # ==============================
-    # TABLA ESTILIZADA
-    # ==============================
-    st.subheader("📋 Detalle")
-
-    def color_rent(val):
-        return "color: #00ff88" if val > 0 else "color: #ff4d4d"
-
-    st.dataframe(
-        df.style.applymap(color_rent, subset=["Rentabilidad %"]),
-        use_container_width=True
-    )
+    st.dataframe(styled, use_container_width=True)
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
