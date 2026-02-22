@@ -215,10 +215,18 @@ if uploaded_file is not None:
                     return "color: red; font-weight: bold;"
                 return ""
 
-            styled = tabla.style \
-                .applymap(estilo, subset=["Cambio Día €", "Cambio Día %",
-                                         "Diferencia €", "Rentabilidad %"]) \
-                .format("{:,.2f}")
+ styled = tabla.style \
+    .applymap(estilo, subset=["Cambio Día €", "Cambio Día %",
+                             "Diferencia €", "Rentabilidad %"]) \
+    .format({
+        "PRECIO TOTAL": "{:,.2f}",
+        "Precio Actual €": "{:,.2f}",
+        "Cambio Día €": "{:,.2f}",
+        "Cambio Día %": "{:.2f}",
+        "Diferencia €": "{:,.2f}",
+        "Rentabilidad %": "{:.2f}",
+        "Peso %": "{:.2f}"
+    })
 
             st.dataframe(styled, use_container_width=True)
 
@@ -228,3 +236,4 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
