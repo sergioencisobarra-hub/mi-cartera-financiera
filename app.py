@@ -189,7 +189,7 @@ if uploaded_file is not None:
     # =========================
     # TABLAS
     # =========================
-    def mostrar_tabla(data, titulo):
+  def mostrar_tabla(data, titulo):
 
     if data.empty:
         return
@@ -242,5 +242,6 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
 
 
