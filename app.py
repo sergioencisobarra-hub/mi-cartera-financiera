@@ -18,8 +18,8 @@ if "IDENTIFICADOR" not in df.columns:
 
 df = df[df["IDENTIFICADOR"].notna()]
 
-df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
-df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
+df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce").fillna(0)
+df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce").fillna(0)
 
 # =========================
 # CONVERSIÓN TICKERS
@@ -41,7 +41,6 @@ def convertir_ticker(t):
     return t
 
 df["TICKER"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
-
 tickers = df["TICKER"].unique().tolist()
 
 # =========================
@@ -72,8 +71,14 @@ for _, row in df.iterrows():
 
     ticker = row["TICKER"]
     acciones = row["ACCIONES"]
-    divisa = str(row["DIVISA"]).upper()
+    divisa = str(row.get("DIVISA", "EUR")).upper()
 
+    p_actual = 0
+    p_ayer = 0
+
+    # -------------------------
+    # Intento principal (download masivo)
+    # -------------------------
     try:
         if len(tickers) == 1:
             datos = close_data
@@ -83,39 +88,60 @@ for _, row in df.iterrows():
         p_actual = datos.iloc[-1]
         p_ayer = datos.iloc[-2]
 
-        if divisa == "USD":
-            p_actual /= eurusd
-            p_ayer /= eurusd
-        elif divisa == "GBP":
-            p_actual = (p_actual / 100 * gbpusd) / eurusd
-            p_ayer = (p_ayer / 100 * gbpusd) / eurusd
+    except:
+        pass
 
-        precio_actual.append(p_actual)
+    # -------------------------
+    # Fallback individual (fondos)
+    # -------------------------
+    if p_actual == 0:
+        try:
+            hist = yf.Ticker(ticker).history(period="2d")
+            p_actual = hist["Close"].iloc[-1]
+            p_ayer = hist["Close"].iloc[-2]
+        except:
+            p_actual = 0
+            p_ayer = 0
 
+    # -------------------------
+    # Conversión divisa
+    # -------------------------
+    if divisa == "USD" and p_actual != 0:
+        p_actual /= eurusd
+        p_ayer /= eurusd
+    elif divisa == "GBP" and p_actual != 0:
+        p_actual = (p_actual / 100 * gbpusd) / eurusd
+        p_ayer = (p_ayer / 100 * gbpusd) / eurusd
+
+    # -------------------------
+    # Cálculo cambio diario
+    # -------------------------
+    if p_ayer != 0:
         cambio_eur = (p_actual - p_ayer) * acciones
         cambio_pct = ((p_actual - p_ayer) / p_ayer) * 100
+    else:
+        cambio_eur = 0
+        cambio_pct = 0
 
-        cambio_dia_eur.append(cambio_eur)
-        cambio_dia_pct.append(cambio_pct)
-
-    except:
-        precio_actual.append(None)
-        cambio_dia_eur.append(0)
-        cambio_dia_pct.append(0)
+    precio_actual.append(p_actual)
+    cambio_dia_eur.append(cambio_eur)
+    cambio_dia_pct.append(cambio_pct)
 
 df["PRECIO ACTUAL €"] = precio_actual
 df["CAMBIO DÍA €"] = cambio_dia_eur
 df["CAMBIO DÍA %"] = cambio_dia_pct
 
-df["PRECIO ACTUAL €"] = df["PRECIO ACTUAL €"].fillna(0)
+# =========================
+# CÁLCULOS GLOBALES
+# =========================
 
 df["VALOR ACTUAL €"] = df["PRECIO ACTUAL €"] * df["ACCIONES"]
 df["DIFERENCIA €"] = df["VALOR ACTUAL €"] - df["PRECIO TOTAL"]
-df["RENTABILIDAD %"] = df["DIFERENCIA €"] / df["PRECIO TOTAL"] * 100
+df["RENTABILIDAD %"] = df["DIFERENCIA €"] / df["PRECIO TOTAL"].replace(0, 1) * 100
 
 total_inicial = df["PRECIO TOTAL"].sum()
 total_actual = df["VALOR ACTUAL €"].sum()
-rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
+rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100 if total_inicial != 0 else 0
 
 # =========================
 # MOVIMIENTO DIARIO GLOBAL
@@ -159,9 +185,6 @@ def mostrar_tabla(data, titulo):
 
     with st.expander(titulo, expanded=True):
 
-        # -------------------------
-        # Detectar mayor subida y bajada
-        # -------------------------
         mayor_subida = data.loc[data["CAMBIO DÍA €"].idxmax()]
         mayor_bajada = data.loc[data["CAMBIO DÍA €"].idxmin()]
 
@@ -169,21 +192,18 @@ def mostrar_tabla(data, titulo):
 
         col1.metric(
             "🔼 Mayor subida",
-            f"{mayor_subida['EMPRESA']}",
+            mayor_subida["EMPRESA"],
             delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} € ({mayor_subida['CAMBIO DÍA %']:.2f}%)"
         )
 
         col2.metric(
             "🔽 Mayor bajada",
-            f"{mayor_bajada['EMPRESA']}",
+            mayor_bajada["EMPRESA"],
             delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} € ({mayor_bajada['CAMBIO DÍA %']:.2f}%)"
         )
 
         st.markdown("---")
 
-        # -------------------------
-        # Tabla
-        # -------------------------
         tabla = data[[
             "EMPRESA",
             "ACCIONES",
@@ -192,8 +212,8 @@ def mostrar_tabla(data, titulo):
             "CAMBIO DÍA €",
             "CAMBIO DÍA %",
             "DIFERENCIA €",
-            "RENTABILIDAD %",
-        ]].sort_values("RENTABILIDAD %", ascending=False)
+            "RENTABILIDAD %"
+        ]]
 
         def estilo(val):
             if val > 0:
@@ -219,6 +239,7 @@ def mostrar_tabla(data, titulo):
             })
 
         st.dataframe(styled, use_container_width=True)
+
 # =========================
 # BLOQUES GEOGRÁFICOS
 # =========================
@@ -241,5 +262,3 @@ mostrar_tabla(df[df["TIPO"] == "ETF"], "ETFs")
 
 st.header("🏦 Fondos")
 mostrar_tabla(df[df["TIPO"] == "FONDO"], "Fondos")
-
-
