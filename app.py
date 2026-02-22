@@ -11,7 +11,7 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 if uploaded_file is not None:
 
     # =========================
-    # CARGA Y LIMPIEZA
+    # CARGA
     # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
@@ -21,7 +21,7 @@ if uploaded_file is not None:
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
     # =========================
-    # CONVERSIÓN TICKERS
+    # CONVERSIÓN TICKER
     # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
@@ -44,31 +44,48 @@ if uploaded_file is not None:
     gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
     precios = []
+    cambio_dia_eur = []
+    cambio_dia_pct = []
 
     for _, row in df.iterrows():
         ticker = row["Ticker"]
         divisa = str(row["DIVISA"]).upper()
 
         try:
-            hist = yf.Ticker(ticker).history(period="1d")
-            precio = float(hist["Close"].iloc[-1])
+            hist = yf.Ticker(ticker).history(period="2d")
+
+            if len(hist) < 2:
+                raise Exception("Histórico insuficiente")
+
+            precio_actual = float(hist["Close"].iloc[-1])
+            precio_ayer = float(hist["Close"].iloc[-2])
 
             if divisa == "USD":
-                precio = precio / eurusd
+                precio_actual /= eurusd
+                precio_ayer /= eurusd
             elif divisa == "GBP":
-                precio = precio / 100
-                precio = (precio * gbpusd) / eurusd
+                precio_actual = (precio_actual / 100 * gbpusd) / eurusd
+                precio_ayer = (precio_ayer / 100 * gbpusd) / eurusd
 
-            precios.append(precio)
+            precios.append(precio_actual)
+
+            cambio_eur = (precio_actual - precio_ayer) * row["ACCIONES"]
+            cambio_pct = ((precio_actual - precio_ayer) / precio_ayer) * 100
+
+            cambio_dia_eur.append(cambio_eur)
+            cambio_dia_pct.append(cambio_pct)
+
         except:
             precios.append(None)
+            cambio_dia_eur.append(None)
+            cambio_dia_pct.append(None)
 
     df["Precio Actual €"] = precios
+    df["Cambio Día €"] = cambio_dia_eur
+    df["Cambio Día %"] = cambio_dia_pct
+
     df = df.dropna(subset=["Precio Actual €"])
 
-    # =========================
-    # CÁLCULOS
-    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Diferencia €"] = df["Valor Actual €"] - df["PRECIO TOTAL"]
     df["Rentabilidad %"] = df["Diferencia €"] / df["PRECIO TOTAL"] * 100
@@ -80,140 +97,121 @@ if uploaded_file is not None:
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
     # =========================
+    # RESUMEN DIARIO GLOBAL
+    # =========================
+    cambio_total_dia = df["Cambio Día €"].sum()
+    cambio_total_pct = (cambio_total_dia / total_actual) * 100
+
+    if cambio_total_dia > 0:
+        flecha = "↑"
+        color = "green"
+    elif cambio_total_dia < 0:
+        flecha = "↓"
+        color = "red"
+    else:
+        flecha = "→"
+        color = "gray"
+
+    st.markdown(
+        f"<h3 style='color:{color};'>{flecha} Movimiento Diario: {cambio_total_dia:,.2f} € ({cambio_total_pct:.2f}%)</h3>",
+        unsafe_allow_html=True
+    )
+
+    # =========================
     # CARDS PRINCIPALES
     # =========================
     col1, col2, col3 = st.columns(3)
     col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
-    col2.metric("Valor Actual", f"{total_actual:,.2f} €")
+    col2.metric("Valor Actual", f"{total_actual:,.2f} €", delta=f"{cambio_total_dia:,.2f} €")
     col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
 
     st.divider()
 
     # =========================
-    # VISIÓN MACRO
+    # MINI HISTÓRICO SEMANAL
     # =========================
-    col_tipo, col_region = st.columns(2)
+    try:
+        tickers_lista = df["Ticker"].tolist()
+        precios_semana = yf.download(tickers_lista, period="7d", interval="1d", group_by="ticker", progress=False)
 
-    with col_tipo:
-        st.subheader("Distribución por Tipo")
-        tipo_chart = df.groupby("TIPO")["Valor Actual €"].sum().reset_index()
-        fig_tipo = px.pie(tipo_chart, names="TIPO", values="Valor Actual €", hole=0.6)
-        fig_tipo.update_layout(showlegend=False)
-        st.plotly_chart(fig_tipo, use_container_width=True)
+        valores_diarios = []
 
-    with col_region:
-        st.subheader("Distribución por Región (Acciones)")
-        acciones_tmp = df[df["TIPO"] == "ACCION"].copy()
+        for fecha in precios_semana.index:
+            valor_dia = 0
 
-        def clasificar_region(ticker):
-            if ticker.endswith(".MC"):
-                return "España"
-            if ticker.endswith(".L"):
-                return "UK"
-            if ticker.endswith((".DE", ".AS", ".PA")):
-                return "Europa"
-            if "." not in ticker:
-                return "USA"
-            return "Otros"
+            for _, row in df.iterrows():
+                ticker = row["Ticker"]
+                acciones = row["ACCIONES"]
+                divisa = row["DIVISA"]
 
-        acciones_tmp["REGION"] = acciones_tmp["Ticker"].apply(clasificar_region)
-        region_chart = acciones_tmp.groupby("REGION")["Valor Actual €"].sum().reset_index()
+                try:
+                    if len(tickers_lista) == 1:
+                        precio = precios_semana["Close"].loc[fecha]
+                    else:
+                        precio = precios_semana[ticker]["Close"].loc[fecha]
 
-        fig_region = px.pie(region_chart, names="REGION", values="Valor Actual €", hole=0.6)
-        fig_region.update_layout(showlegend=False)
-        st.plotly_chart(fig_region, use_container_width=True)
+                    if divisa == "USD":
+                        precio /= eurusd
+                    elif divisa == "GBP":
+                        precio = (precio / 100 * gbpusd) / eurusd
+
+                    valor_dia += precio * acciones
+
+                except:
+                    continue
+
+            valores_diarios.append(valor_dia)
+
+        historico_df = pd.DataFrame({
+            "Fecha": precios_semana.index,
+            "Valor Total €": valores_diarios
+        })
+
+        fig_hist = px.line(historico_df, x="Fecha", y="Valor Total €")
+        fig_hist.update_layout(height=250, showlegend=False)
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    except:
+        st.warning("No se pudo generar el histórico semanal.")
 
     st.divider()
 
     # =========================
-    # FUNCIÓN BLOQUES
+    # FUNCIÓN TABLAS
     # =========================
-    def mostrar_bloque(data, titulo):
+    def mostrar_tabla(data, titulo):
 
         if data.empty:
             return
 
         with st.expander(titulo, expanded=True):
 
-            valor = data["Valor Actual €"].sum()
-            inversion = data["PRECIO TOTAL"].sum()
-            rent = (valor - inversion) / inversion * 100
-            peso_bloque = valor / total_actual * 100
-            resto = 100 - peso_bloque
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Valor del bloque", f"{valor:,.2f} €")
-            col2.metric("Rentabilidad del bloque", f"{rent:.2f} %")
-            col3.metric("% sobre la cartera", f"{peso_bloque:.2f} %")
-
-            st.markdown("---")
-
-            col_bar, col_pie = st.columns([4, 2])
-
-            with col_bar:
-                fig_bar = px.bar(
-                    data.sort_values("Peso %"),
-                    x="Peso %",
-                    y="EMPRESA",
-                    orientation="h",
-                    height=350
-                )
-                fig_bar.update_layout(margin=dict(l=10, r=10, t=10, b=10))
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-            with col_pie:
-                pie_data = pd.DataFrame({
-                    "Segmento": ["Bloque", "Resto"],
-                    "Porcentaje": [peso_bloque, resto]
-                })
-                fig_pie = px.pie(pie_data, names="Segmento", values="Porcentaje", hole=0.5)
-                fig_pie.update_layout(showlegend=False)
-                st.plotly_chart(fig_pie, use_container_width=True)
-
             tabla = data[[
                 "EMPRESA",
                 "ACCIONES",
                 "PRECIO TOTAL",
                 "Precio Actual €",
+                "Cambio Día €",
+                "Cambio Día %",
                 "Diferencia €",
                 "Rentabilidad %",
                 "Peso %"
             ]].sort_values("Peso %", ascending=False)
 
-            def estilo_rentabilidad(val):
-                if val >= 15:
-                    return "color: #0f5132; font-weight: bold; font-size: 110%; background-color: rgba(25,135,84,0.15);"
-                elif val > 0:
-                    return "color: #198754; font-weight: bold;"
-                elif val <= -10:
-                    return "color: #842029; font-weight: bold; background-color: rgba(220,53,69,0.15);"
-                elif val < 0:
-                    return "color: #dc3545; font-weight: bold;"
-                return ""
-
-            def estilo_diferencia(val):
+            def estilo(val):
                 if val > 0:
-                    return "color: #198754; font-weight: bold;"
+                    return "color: green; font-weight: bold;"
                 elif val < 0:
-                    return "color: #dc3545; font-weight: bold;"
-                return ""
-
-            def estilo_peso(val):
-                if val > 10:
-                    return "color: #dc3545; font-weight: bold;"
-                elif val > 5:
-                    return "color: #fd7e14; font-weight: bold;"
-                elif val > 3:
-                    return "color: #ffc107;"
+                    return "color: red; font-weight: bold;"
                 return ""
 
             styled = tabla.style \
-                .applymap(estilo_rentabilidad, subset=["Rentabilidad %"]) \
-                .applymap(estilo_diferencia, subset=["Diferencia €"]) \
-                .applymap(estilo_peso, subset=["Peso %"]) \
+                .applymap(estilo, subset=["Cambio Día €", "Cambio Día %", "Diferencia €", "Rentabilidad %"]) \
                 .format({
                     "PRECIO TOTAL": "{:,.2f}",
                     "Precio Actual €": "{:,.2f}",
+                    "Cambio Día €": "{:,.2f}",
+                    "Cambio Día %": "{:.2f}",
                     "Diferencia €": "{:,.2f}",
                     "Rentabilidad %": "{:.2f}",
                     "Peso %": "{:.2f}"
@@ -225,28 +223,17 @@ if uploaded_file is not None:
     # BLOQUES
     # =========================
     acciones = df[df["TIPO"] == "ACCION"]
-    esp = acciones[acciones["Ticker"].str.endswith(".MC")]
-    uk = acciones[acciones["Ticker"].str.endswith(".L")]
-    eur = acciones[acciones["Ticker"].str.endswith((".DE", ".AS", ".PA"))]
-    usa = acciones[~acciones["Ticker"].str.contains(r"\.")]
+    etfs = df[df["TIPO"] == "ETF"]
+    fondos = df[df["TIPO"] == "FONDO"]
 
     st.header("📈 Acciones")
-    mostrar_bloque(esp, "🇪🇸 España")
-    mostrar_bloque(eur, "🇪🇺 Europa")
-    mostrar_bloque(usa, "🇺🇸 USA")
-    mostrar_bloque(uk, "🇬🇧 UK")
-
-    st.divider()
+    mostrar_tabla(acciones, "Acciones")
 
     st.header("📊 ETFs")
-    etfs = df[df["TIPO"] == "ETF"]
-    mostrar_bloque(etfs, "ETFs")
+    mostrar_tabla(etfs, "ETFs")
 
-    st.divider()
-
-    st.header("🏦 Fondos de Inversión")
-    fondos = df[df["TIPO"] == "FONDO"]
-    mostrar_bloque(fondos, "Fondos")
+    st.header("🏦 Fondos")
+    mostrar_tabla(fondos, "Fondos")
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
