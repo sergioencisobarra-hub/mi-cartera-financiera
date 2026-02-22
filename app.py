@@ -9,9 +9,9 @@ st.title("📊 Mi Cartera")
 uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 
 # =========================
-# CACHE DESCARGAS
+# CACHE DATOS
 # =========================
-@st.cache_data(ttl=900)  # 15 minutos
+@st.cache_data(ttl=900)
 def descargar_precios(tickers):
     return yf.download(
         tickers,
@@ -27,6 +27,7 @@ def descargar_divisas():
     gbpusd = fx["Close"]["GBPUSD=X"].iloc[-1]
     return eurusd, gbpusd
 
+
 if uploaded_file is not None:
 
     df = pd.read_excel(uploaded_file)
@@ -36,6 +37,9 @@ if uploaded_file is not None:
     df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
+    # -------------------------
+    # Conversión de ticker
+    # -------------------------
     def convertir_ticker(t):
         if t.startswith("BME:"):
             return t.split(":")[1] + ".MC"
@@ -55,51 +59,51 @@ if uploaded_file is not None:
 
     tickers = df["Ticker"].unique().tolist()
 
-    # Descargar todo de golpe
     precios = descargar_precios(tickers)
     eurusd, gbpusd = descargar_divisas()
 
-    precios_close = precios["Close"]
+    close_data = precios["Close"]
 
-    precio_actual_lista = []
+    precio_actual = []
     cambio_dia_eur = []
     cambio_dia_pct = []
 
     for _, row in df.iterrows():
+
         ticker = row["Ticker"]
         acciones = row["ACCIONES"]
         divisa = str(row["DIVISA"]).upper()
 
         try:
             if len(tickers) == 1:
-                datos = precios_close
+                datos = close_data
             else:
-                datos = precios_close[ticker]
+                datos = close_data[ticker]
 
-            precio_actual = datos.iloc[-1]
-            precio_ayer = datos.iloc[-2]
+            p_actual = datos.iloc[-1]
+            p_ayer = datos.iloc[-2]
 
             if divisa == "USD":
-                precio_actual /= eurusd
-                precio_ayer /= eurusd
+                p_actual /= eurusd
+                p_ayer /= eurusd
             elif divisa == "GBP":
-                precio_actual = (precio_actual / 100 * gbpusd) / eurusd
-                precio_ayer = (precio_ayer / 100 * gbpusd) / eurusd
+                p_actual = (p_actual / 100 * gbpusd) / eurusd
+                p_ayer = (p_ayer / 100 * gbpusd) / eurusd
 
-            precio_actual_lista.append(precio_actual)
+            precio_actual.append(p_actual)
 
-            cambio_eur = (precio_actual - precio_ayer) * acciones
-            cambio_pct = ((precio_actual - precio_ayer) / precio_ayer) * 100
+            cambio_eur = (p_actual - p_ayer) * acciones
+            cambio_pct = ((p_actual - p_ayer) / p_ayer) * 100
 
             cambio_dia_eur.append(cambio_eur)
             cambio_dia_pct.append(cambio_pct)
 
         except:
-            precio_actual_lista.append(None)
+            precio_actual.append(None)
             cambio_dia_eur.append(0)
             cambio_dia_pct.append(0)
 
-    df["Precio Actual €"] = precio_actual_lista
+    df["Precio Actual €"] = precio_actual
     df["Cambio Día €"] = cambio_dia_eur
     df["Cambio Día %"] = cambio_dia_pct
 
@@ -115,9 +119,9 @@ if uploaded_file is not None:
 
     df["Peso %"] = df["Valor Actual €"] / total_actual * 100
 
-    # =========================
-    # RESUMEN DIARIO
-    # =========================
+    # -------------------------
+    # Movimiento diario global
+    # -------------------------
     cambio_total_dia = df["Cambio Día €"].sum()
     cambio_total_pct = (cambio_total_dia / total_actual) * 100 if total_actual != 0 else 0
 
@@ -132,7 +136,8 @@ if uploaded_file is not None:
         color = "gray"
 
     st.markdown(
-        f"<h3 style='color:{color};'>{flecha} Movimiento Diario: {cambio_total_dia:,.2f} € ({cambio_total_pct:.2f}%)</h3>",
+        f"<h3 style='color:{color};'>{flecha} Movimiento Diario: "
+        f"{cambio_total_dia:,.2f} € ({cambio_total_pct:.2f}%)</h3>",
         unsafe_allow_html=True
     )
 
@@ -144,24 +149,25 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # =========================
-    # HISTÓRICO SEMANAL
-    # =========================
+    # -------------------------
+    # Histórico semanal
+    # -------------------------
     valores_diarios = []
 
-    for i in range(len(precios_close)):
+    for i in range(len(close_data)):
         valor_dia = 0
 
         for _, row in df.iterrows():
+
             ticker = row["Ticker"]
             acciones = row["ACCIONES"]
             divisa = row["DIVISA"]
 
             try:
                 if len(tickers) == 1:
-                    precio = precios_close.iloc[i]
+                    precio = close_data.iloc[i]
                 else:
-                    precio = precios_close[ticker].iloc[i]
+                    precio = close_data[ticker].iloc[i]
 
                 if divisa == "USD":
                     precio /= eurusd
@@ -176,72 +182,68 @@ if uploaded_file is not None:
         valores_diarios.append(valor_dia)
 
     historico_df = pd.DataFrame({
-        "Fecha": precios_close.index,
+        "Fecha": close_data.index,
         "Valor Total €": valores_diarios
     })
 
-    fig_hist = px.line(historico_df, x="Fecha", y="Valor Total €", markers=True)
-    fig_hist.update_layout(height=250, showlegend=False)
-    st.plotly_chart(fig_hist, use_container_width=True)
+    fig = px.line(historico_df, x="Fecha", y="Valor Total €", markers=True)
+    fig.update_layout(height=250, showlegend=False)
+
+    st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    # =========================
+    # -------------------------
     # TABLAS
-    # =========================
-def mostrar_tabla(data, titulo):
+    # -------------------------
+    def mostrar_tabla(data, titulo):
 
-    if data.empty:
-        return
+        if data.empty:
+            return
 
-    with st.expander(titulo, expanded=True):
+        with st.expander(titulo, expanded=True):
 
-        tabla = data[[
-            "EMPRESA",
-            "ACCIONES",
-            "PRECIO TOTAL",
-            "Precio Actual €",
-            "Cambio Día €",
-            "Cambio Día %",
-            "Diferencia €",
-            "Rentabilidad %",
-            "Peso %"
-        ]].sort_values("Peso %", ascending=False)
-
-        def estilo(val):
-            if val > 0:
-                return "color: green; font-weight: bold;"
-            elif val < 0:
-                return "color: red; font-weight: bold;"
-            return ""
-
-        styled = (
-            tabla.style
-            .applymap(estilo, subset=[
+            tabla = data[[
+                "EMPRESA",
+                "ACCIONES",
+                "PRECIO TOTAL",
+                "Precio Actual €",
                 "Cambio Día €",
                 "Cambio Día %",
                 "Diferencia €",
-                "Rentabilidad %"
-            ])
-            .format({
-                "PRECIO TOTAL": "{:,.2f}",
-                "Precio Actual €": "{:,.2f}",
-                "Cambio Día €": "{:,.2f}",
-                "Cambio Día %": "{:.2f}",
-                "Diferencia €": "{:,.2f}",
-                "Rentabilidad %": "{:.2f}",
-                "Peso %": "{:.2f}"
-            })
-        )
+                "Rentabilidad %",
+                "Peso %"
+            ]].sort_values("Peso %", ascending=False)
 
-        st.dataframe(styled, use_container_width=True)
+            def estilo(val):
+                if val > 0:
+                    return "color: green; font-weight: bold;"
+                elif val < 0:
+                    return "color: red; font-weight: bold;"
+                return ""
+
+            styled = tabla.style \
+                .applymap(estilo, subset=[
+                    "Cambio Día €",
+                    "Cambio Día %",
+                    "Diferencia €",
+                    "Rentabilidad %"
+                ]) \
+                .format({
+                    "PRECIO TOTAL": "{:,.2f}",
+                    "Precio Actual €": "{:,.2f}",
+                    "Cambio Día €": "{:,.2f}",
+                    "Cambio Día %": "{:.2f}",
+                    "Diferencia €": "{:,.2f}",
+                    "Rentabilidad %": "{:.2f}",
+                    "Peso %": "{:.2f}"
+                })
+
+            st.dataframe(styled, use_container_width=True)
+
     mostrar_tabla(df[df["TIPO"] == "ACCION"], "📈 Acciones")
     mostrar_tabla(df[df["TIPO"] == "ETF"], "📊 ETFs")
     mostrar_tabla(df[df["TIPO"] == "FONDO"], "🏦 Fondos")
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
-
-
-
-
