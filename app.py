@@ -11,7 +11,7 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 if uploaded_file is not None:
 
     # =========================
-    # CARGA
+    # CARGA Y LIMPIEZA
     # =========================
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
@@ -21,7 +21,7 @@ if uploaded_file is not None:
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
     # =========================
-    # CONVERSIÓN TICKER
+    # CONVERSIÓN TICKERS
     # =========================
     def convertir_ticker(t):
         if t.startswith("BME:"):
@@ -40,6 +40,9 @@ if uploaded_file is not None:
 
     df["Ticker"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
+    # =========================
+    # TIPOS DE CAMBIO
+    # =========================
     eurusd = float(yf.Ticker("EURUSD=X").history(period="1d")["Close"].iloc[-1])
     gbpusd = float(yf.Ticker("GBPUSD=X").history(period="1d")["Close"].iloc[-1])
 
@@ -47,6 +50,9 @@ if uploaded_file is not None:
     cambio_dia_eur = []
     cambio_dia_pct = []
 
+    # =========================
+    # DESCARGA PRECIOS
+    # =========================
     for _, row in df.iterrows():
         ticker = row["Ticker"]
         divisa = str(row["DIVISA"]).upper()
@@ -55,7 +61,7 @@ if uploaded_file is not None:
             hist = yf.Ticker(ticker).history(period="2d")
 
             if len(hist) < 2:
-                raise Exception("Histórico insuficiente")
+                raise Exception("Sin histórico suficiente")
 
             precio_actual = float(hist["Close"].iloc[-1])
             precio_ayer = float(hist["Close"].iloc[-2])
@@ -77,8 +83,8 @@ if uploaded_file is not None:
 
         except:
             precios.append(None)
-            cambio_dia_eur.append(None)
-            cambio_dia_pct.append(None)
+            cambio_dia_eur.append(0)
+            cambio_dia_pct.append(0)
 
     df["Precio Actual €"] = precios
     df["Cambio Día €"] = cambio_dia_eur
@@ -86,6 +92,9 @@ if uploaded_file is not None:
 
     df = df.dropna(subset=["Precio Actual €"])
 
+    # =========================
+    # CÁLCULOS GENERALES
+    # =========================
     df["Valor Actual €"] = df["Precio Actual €"] * df["ACCIONES"]
     df["Diferencia €"] = df["Valor Actual €"] - df["PRECIO TOTAL"]
     df["Rentabilidad %"] = df["Diferencia €"] / df["PRECIO TOTAL"] * 100
@@ -100,7 +109,7 @@ if uploaded_file is not None:
     # RESUMEN DIARIO GLOBAL
     # =========================
     cambio_total_dia = df["Cambio Día €"].sum()
-    cambio_total_pct = (cambio_total_dia / total_actual) * 100
+    cambio_total_pct = (cambio_total_dia / total_actual) * 100 if total_actual != 0 else 0
 
     if cambio_total_dia > 0:
         flecha = "↑"
@@ -113,7 +122,9 @@ if uploaded_file is not None:
         color = "gray"
 
     st.markdown(
-        f"<h3 style='color:{color};'>{flecha} Movimiento Diario: {cambio_total_dia:,.2f} € ({cambio_total_pct:.2f}%)</h3>",
+        f"<h3 style='color:{color};'>"
+        f"{flecha} Movimiento Diario: {cambio_total_dia:,.2f} € ({cambio_total_pct:.2f}%)"
+        f"</h3>",
         unsafe_allow_html=True
     )
 
@@ -121,8 +132,15 @@ if uploaded_file is not None:
     # CARDS PRINCIPALES
     # =========================
     col1, col2, col3 = st.columns(3)
+
     col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
-    col2.metric("Valor Actual", f"{total_actual:,.2f} €", delta=f"{cambio_total_dia:,.2f} €")
+
+    col2.metric(
+        "Valor Actual",
+        f"{total_actual:,.2f} €",
+        delta=f"{cambio_total_dia:,.2f} €"
+    )
+
     col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
 
     st.divider()
@@ -132,11 +150,22 @@ if uploaded_file is not None:
     # =========================
     try:
         tickers_lista = df["Ticker"].tolist()
-        precios_semana = yf.download(tickers_lista, period="7d", interval="1d", group_by="ticker", progress=False)
+
+        precios_semana = yf.download(
+            tickers_lista,
+            period="7d",
+            interval="1d",
+            progress=False
+        )
+
+        if "Close" in precios_semana:
+            close_data = precios_semana["Close"]
+        else:
+            close_data = precios_semana
 
         valores_diarios = []
 
-        for fecha in precios_semana.index:
+        for fecha in close_data.index:
             valor_dia = 0
 
             for _, row in df.iterrows():
@@ -146,9 +175,9 @@ if uploaded_file is not None:
 
                 try:
                     if len(tickers_lista) == 1:
-                        precio = precios_semana["Close"].loc[fecha]
+                        precio = close_data.loc[fecha]
                     else:
-                        precio = precios_semana[ticker]["Close"].loc[fecha]
+                        precio = close_data[ticker].loc[fecha]
 
                     if divisa == "USD":
                         precio /= eurusd
@@ -163,16 +192,17 @@ if uploaded_file is not None:
             valores_diarios.append(valor_dia)
 
         historico_df = pd.DataFrame({
-            "Fecha": precios_semana.index,
+            "Fecha": close_data.index,
             "Valor Total €": valores_diarios
         })
 
-        fig_hist = px.line(historico_df, x="Fecha", y="Valor Total €")
+        fig_hist = px.line(historico_df, x="Fecha", y="Valor Total €", markers=True)
         fig_hist.update_layout(height=250, showlegend=False)
+
         st.plotly_chart(fig_hist, use_container_width=True)
 
     except:
-        st.warning("No se pudo generar el histórico semanal.")
+        st.info("Histórico semanal no disponible temporalmente.")
 
     st.divider()
 
@@ -206,7 +236,8 @@ if uploaded_file is not None:
                 return ""
 
             styled = tabla.style \
-                .applymap(estilo, subset=["Cambio Día €", "Cambio Día %", "Diferencia €", "Rentabilidad %"]) \
+                .applymap(estilo, subset=["Cambio Día €", "Cambio Día %",
+                                         "Diferencia €", "Rentabilidad %"]) \
                 .format({
                     "PRECIO TOTAL": "{:,.2f}",
                     "Precio Actual €": "{:,.2f}",
