@@ -6,7 +6,16 @@ import plotly.express as px
 st.set_page_config(page_title="Cartera", layout="wide")
 st.title("📊 Mi Cartera")
 
-uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
+# =========================
+# CARGA DIRECTA CARTERA
+# =========================
+
+df = pd.read_excel("CARTERA.xlsx")
+df.columns = df.columns.str.strip()
+df = df[df["IDENTIFICADOR"].notna()]
+
+df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
+df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
 # =========================
 # CACHE DATOS
@@ -258,3 +267,4 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
