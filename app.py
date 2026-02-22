@@ -11,8 +11,23 @@ st.title("📊 Mi Cartera")
 # =========================
 
 df = pd.read_excel("CARTERA.xlsx")
-df.columns = df.columns.str.strip()
-df = df[df["IDENTIFICADOR"].notna()]
+
+# Limpiar nombres de columnas
+df.columns = df.columns.str.strip().str.upper()
+
+# Detectar columna identificador automáticamente
+if "IDENTIFICADOR" in df.columns:
+    col_id = "IDENTIFICADOR"
+elif "TICKER" in df.columns:
+    col_id = "TICKER"
+elif "STICKER" in df.columns:
+    col_id = "STICKER"
+else:
+    st.error("No se encontró columna de identificador en el Excel.")
+    st.stop()
+
+df = df[df[col_id].notna()]
+df.rename(columns={col_id: "IDENTIFICADOR"}, inplace=True)
 
 df["ACCIONES"] = pd.to_numeric(df["ACCIONES"], errors="coerce")
 df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
@@ -267,4 +282,5 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
 
