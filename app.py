@@ -13,12 +13,7 @@ uploaded_file = st.file_uploader("Sube tu archivo CARTERA.xlsx", type=["xlsx"])
 # =========================
 @st.cache_data(ttl=900)
 def descargar_precios(tickers):
-    return yf.download(
-        tickers,
-        period="7d",
-        interval="1d",
-        progress=False
-    )
+    return yf.download(tickers, period="7d", interval="1d", progress=False)
 
 @st.cache_data(ttl=900)
 def descargar_divisas():
@@ -38,7 +33,7 @@ if uploaded_file is not None:
     df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce")
 
     # -------------------------
-    # Conversión de ticker
+    # Conversión ticker
     # -------------------------
     def convertir_ticker(t):
         if t.startswith("BME:"):
@@ -142,7 +137,6 @@ if uploaded_file is not None:
     )
 
     col1, col2, col3 = st.columns(3)
-
     col1.metric("Inversión Inicial", f"{total_inicial:,.2f} €")
     col2.metric("Valor Actual", f"{total_actual:,.2f} €", delta=f"{cambio_total_dia:,.2f} €")
     col3.metric("Rentabilidad Total", f"{rentabilidad_total:.2f} %")
@@ -156,7 +150,6 @@ if uploaded_file is not None:
 
     for i in range(len(close_data)):
         valor_dia = 0
-
         for _, row in df.iterrows():
 
             ticker = row["Ticker"]
@@ -188,13 +181,12 @@ if uploaded_file is not None:
 
     fig = px.line(historico_df, x="Fecha", y="Valor Total €", markers=True)
     fig.update_layout(height=250, showlegend=False)
-
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
     # -------------------------
-    # TABLAS
+    # FUNCIÓN TABLA
     # -------------------------
     def mostrar_tabla(data, titulo):
 
@@ -241,9 +233,28 @@ if uploaded_file is not None:
 
             st.dataframe(styled, use_container_width=True)
 
-    mostrar_tabla(df[df["TIPO"] == "ACCION"], "📈 Acciones")
-    mostrar_tabla(df[df["TIPO"] == "ETF"], "📊 ETFs")
-    mostrar_tabla(df[df["TIPO"] == "FONDO"], "🏦 Fondos")
+    # -------------------------
+    # BLOQUES GEOGRÁFICOS
+    # -------------------------
+    acciones = df[df["TIPO"] == "ACCION"]
+
+    esp = acciones[acciones["Ticker"].str.endswith(".MC")]
+    uk = acciones[acciones["Ticker"].str.endswith(".L")]
+    eur = acciones[acciones["Ticker"].str.endswith((".DE", ".AS", ".PA"))]
+    usa = acciones[~acciones["Ticker"].str.contains(r"\.")]
+
+    st.header("📈 Acciones")
+
+    mostrar_tabla(esp, "🇪🇸 España")
+    mostrar_tabla(eur, "🇪🇺 Europa")
+    mostrar_tabla(usa, "🇺🇸 USA")
+    mostrar_tabla(uk, "🇬🇧 UK")
+
+    st.header("📊 ETFs")
+    mostrar_tabla(df[df["TIPO"] == "ETF"], "ETFs")
+
+    st.header("🏦 Fondos")
+    mostrar_tabla(df[df["TIPO"] == "FONDO"], "Fondos")
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
