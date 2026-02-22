@@ -159,6 +159,31 @@ def mostrar_tabla(data, titulo):
 
     with st.expander(titulo, expanded=True):
 
+        # -------------------------
+        # Detectar mayor subida y bajada
+        # -------------------------
+        mayor_subida = data.loc[data["CAMBIO DÍA €"].idxmax()]
+        mayor_bajada = data.loc[data["CAMBIO DÍA €"].idxmin()]
+
+        col1, col2 = st.columns(2)
+
+        col1.metric(
+            "🔼 Mayor subida",
+            f"{mayor_subida['EMPRESA']}",
+            delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} € ({mayor_subida['CAMBIO DÍA %']:.2f}%)"
+        )
+
+        col2.metric(
+            "🔽 Mayor bajada",
+            f"{mayor_bajada['EMPRESA']}",
+            delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} € ({mayor_bajada['CAMBIO DÍA %']:.2f}%)"
+        )
+
+        st.markdown("---")
+
+        # -------------------------
+        # Tabla
+        # -------------------------
         tabla = data[[
             "EMPRESA",
             "ACCIONES",
@@ -194,7 +219,6 @@ def mostrar_tabla(data, titulo):
             })
 
         st.dataframe(styled, use_container_width=True)
-
 # =========================
 # BLOQUES GEOGRÁFICOS
 # =========================
@@ -217,3 +241,4 @@ mostrar_tabla(df[df["TIPO"] == "ETF"], "ETFs")
 
 st.header("🏦 Fondos")
 mostrar_tabla(df[df["TIPO"] == "FONDO"], "Fondos")
+
