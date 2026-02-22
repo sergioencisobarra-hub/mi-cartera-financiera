@@ -107,7 +107,7 @@ df["PRECIO ACTUAL €"] = precio_actual
 df["CAMBIO DÍA €"] = cambio_dia_eur
 df["CAMBIO DÍA %"] = cambio_dia_pct
 
-df = df.dropna(subset=["PRECIO ACTUAL €"])
+df["PRECIO ACTUAL €"] = df["PRECIO ACTUAL €"].fillna(0)
 
 df["VALOR ACTUAL €"] = df["PRECIO ACTUAL €"] * df["ACCIONES"]
 df["DIFERENCIA €"] = df["VALOR ACTUAL €"] - df["PRECIO TOTAL"]
@@ -241,4 +241,5 @@ mostrar_tabla(df[df["TIPO"] == "ETF"], "ETFs")
 
 st.header("🏦 Fondos")
 mostrar_tabla(df[df["TIPO"] == "FONDO"], "Fondos")
+
 
