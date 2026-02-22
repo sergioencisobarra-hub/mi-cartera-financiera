@@ -191,44 +191,50 @@ if uploaded_file is not None:
     # =========================
     def mostrar_tabla(data, titulo):
 
-        if data.empty:
-            return
+    if data.empty:
+        return
 
-        with st.expander(titulo, expanded=True):
+    with st.expander(titulo, expanded=True):
 
-            tabla = data[[
-                "EMPRESA",
-                "ACCIONES",
-                "PRECIO TOTAL",
-                "Precio Actual €",
+        tabla = data[[
+            "EMPRESA",
+            "ACCIONES",
+            "PRECIO TOTAL",
+            "Precio Actual €",
+            "Cambio Día €",
+            "Cambio Día %",
+            "Diferencia €",
+            "Rentabilidad %",
+            "Peso %"
+        ]].sort_values("Peso %", ascending=False)
+
+        def estilo(val):
+            if val > 0:
+                return "color: green; font-weight: bold;"
+            elif val < 0:
+                return "color: red; font-weight: bold;"
+            return ""
+
+        styled = (
+            tabla.style
+            .applymap(estilo, subset=[
                 "Cambio Día €",
                 "Cambio Día %",
                 "Diferencia €",
-                "Rentabilidad %",
-                "Peso %"
-            ]].sort_values("Peso %", ascending=False)
+                "Rentabilidad %"
+            ])
+            .format({
+                "PRECIO TOTAL": "{:,.2f}",
+                "Precio Actual €": "{:,.2f}",
+                "Cambio Día €": "{:,.2f}",
+                "Cambio Día %": "{:.2f}",
+                "Diferencia €": "{:,.2f}",
+                "Rentabilidad %": "{:.2f}",
+                "Peso %": "{:.2f}"
+            })
+        )
 
-            def estilo(val):
-                if val > 0:
-                    return "color: green; font-weight: bold;"
-                elif val < 0:
-                    return "color: red; font-weight: bold;"
-                return ""
-
- styled = tabla.style \
-    .applymap(estilo, subset=["Cambio Día €", "Cambio Día %",
-                             "Diferencia €", "Rentabilidad %"]) \
-    .format({
-        "PRECIO TOTAL": "{:,.2f}",
-        "Precio Actual €": "{:,.2f}",
-        "Cambio Día €": "{:,.2f}",
-        "Cambio Día %": "{:.2f}",
-        "Diferencia €": "{:,.2f}",
-        "Rentabilidad %": "{:.2f}",
-        "Peso %": "{:.2f}"
-    })
-
-            st.dataframe(styled, use_container_width=True)
+        st.dataframe(styled, use_container_width=True)
 
     mostrar_tabla(df[df["TIPO"] == "ACCION"], "📈 Acciones")
     mostrar_tabla(df[df["TIPO"] == "ETF"], "📊 ETFs")
@@ -236,4 +242,5 @@ if uploaded_file is not None:
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
 
