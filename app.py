@@ -189,7 +189,7 @@ if uploaded_file is not None:
     # =========================
     # TABLAS
     # =========================
-  def mostrar_tabla(data, titulo):
+def mostrar_tabla(data, titulo):
 
     if data.empty:
         return
@@ -235,13 +235,13 @@ if uploaded_file is not None:
         )
 
         st.dataframe(styled, use_container_width=True)
-
     mostrar_tabla(df[df["TIPO"] == "ACCION"], "📈 Acciones")
     mostrar_tabla(df[df["TIPO"] == "ETF"], "📊 ETFs")
     mostrar_tabla(df[df["TIPO"] == "FONDO"], "🏦 Fondos")
 
 else:
     st.info("Sube tu archivo Excel para empezar.")
+
 
 
 
