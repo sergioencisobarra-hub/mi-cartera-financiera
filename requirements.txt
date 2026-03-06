@@ -1,5 +1,6 @@
 streamlit
 pandas
 yfinance
-requests
+investpy
+setuptools
 openpyxl
