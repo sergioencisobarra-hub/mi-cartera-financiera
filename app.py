@@ -4,7 +4,8 @@ import yfinance as yf
 import investpy
 from datetime import datetime
 
-st.set_page_config(page_title="Cartera", layout="wide")
+st.set_page_config(page_title="Mi Cartera", layout="wide")
+
 st.title("📊 Mi Cartera")
 
 # =========================
@@ -43,19 +44,17 @@ def convertir_ticker(t):
 
     return t
 
+
 df["TICKER"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
 
 # =========================
-# CACHE PRECIOS ACCIONES
+# CACHE DATOS
 # =========================
 
 @st.cache_data(ttl=1800)
 def descargar_precios(tickers):
     return yf.download(tickers, period="2d", interval="1d", progress=False)
 
-# =========================
-# CACHE DIVISAS
-# =========================
 
 @st.cache_data(ttl=1800)
 def descargar_divisas():
@@ -67,6 +66,7 @@ def descargar_divisas():
 
     return eurusd, gbpusd
 
+
 eurusd, gbpusd = descargar_divisas()
 
 tickers_acciones = df[df["TIPO"]!="FONDO"]["TICKER"].unique().tolist()
@@ -75,26 +75,38 @@ precios = descargar_precios(tickers_acciones)
 
 close_data = precios["Close"]
 
-precio_actual = []
-cambio_dia_eur = []
-cambio_dia_pct = []
-
 # =========================
 # FUNCIÓN NAV FONDOS
 # =========================
 
-def obtener_nav_fondo(nombre):
+def obtener_nav_fondo(row):
 
     try:
 
+        isin = row["IDENTIFICADOR"]
+        nombre = row["EMPRESA"]
+
         hoy = datetime.today().strftime("%d/%m/%Y")
 
-        datos = investpy.get_fund_historical_data(
-            fund=nombre,
-            country="luxembourg",
-            from_date="01/01/2024",
-            to_date=hoy
-        )
+        # Intentar por ISIN
+        try:
+
+            datos = investpy.get_fund_historical_data(
+                fund=isin,
+                country="luxembourg",
+                from_date="01/01/2024",
+                to_date=hoy
+            )
+
+        except:
+
+            # Intentar por nombre
+            datos = investpy.get_fund_historical_data(
+                fund=nombre,
+                country="luxembourg",
+                from_date="01/01/2024",
+                to_date=hoy
+            )
 
         nav = datos["Close"].iloc[-1]
         nav_ayer = datos["Close"].iloc[-2]
@@ -102,7 +114,13 @@ def obtener_nav_fondo(nombre):
         return nav, nav_ayer
 
     except:
+
         return 0,0
+
+
+precio_actual = []
+cambio_dia_eur = []
+cambio_dia_pct = []
 
 # =========================
 # CALCULAR PRECIOS
@@ -118,7 +136,7 @@ for _,row in df.iterrows():
     p_actual = 0
     p_ayer = 0
 
-    # -------- ACCIONES / ETF --------
+    # ---------- ACCIONES / ETF ----------
 
     if tipo != "FONDO":
 
@@ -130,20 +148,20 @@ for _,row in df.iterrows():
             p_ayer = datos.iloc[-2]
 
         except:
-            pass
 
-    # -------- FONDOS --------
+            p_actual = 0
+            p_ayer = 0
+
+    # ---------- FONDOS ----------
 
     else:
 
-        nombre_fondo = row["EMPRESA"]
-
-        nav, nav_ayer = obtener_nav_fondo(nombre_fondo)
+        nav, nav_ayer = obtener_nav_fondo(row)
 
         p_actual = nav
         p_ayer = nav_ayer
 
-    # -------- DIVISAS --------
+    # ---------- DIVISAS ----------
 
     if divisa == "USD" and p_actual != 0:
 
@@ -155,7 +173,7 @@ for _,row in df.iterrows():
         p_actual = (p_actual/100*gbpusd)/eurusd
         p_ayer = (p_ayer/100*gbpusd)/eurusd
 
-    # -------- CAMBIO DIARIO --------
+    # ---------- CAMBIO DIARIO ----------
 
     if p_ayer != 0:
 
@@ -170,6 +188,7 @@ for _,row in df.iterrows():
     precio_actual.append(p_actual)
     cambio_dia_eur.append(cambio_eur)
     cambio_dia_pct.append(cambio_pct)
+
 
 df["PRECIO ACTUAL €"] = precio_actual
 df["CAMBIO DÍA €"] = cambio_dia_eur
@@ -194,15 +213,21 @@ rentabilidad_total = (total_actual-total_inicial)/total_inicial*100
 
 cambio_total_dia = df["CAMBIO DÍA €"].sum()
 
-if cambio_total_dia>0:
+if cambio_total_dia > 0:
+
     flecha="↑"
     color="green"
-elif cambio_total_dia<0:
+
+elif cambio_total_dia < 0:
+
     flecha="↓"
     color="red"
+
 else:
+
     flecha="→"
     color="gray"
+
 
 st.markdown(
 f"<h3 style='color:{color};'>{flecha} Movimiento Diario: {cambio_total_dia:,.2f} €</h3>",
@@ -233,13 +258,19 @@ def mostrar_tabla(data,titulo):
 
         col1,col2 = st.columns(2)
 
-        col1.metric("🔼 Mayor subida",
-        mayor_subida["EMPRESA"],
-        delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} €")
+        col1.metric(
+            "🔼 Mayor subida",
+            mayor_subida["EMPRESA"],
+            delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} € ({mayor_subida['CAMBIO DÍA %']:.2f}%)"
+        )
 
-        col2.metric("🔽 Mayor bajada",
-        mayor_bajada["EMPRESA"],
-        delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} €")
+        col2.metric(
+            "🔽 Mayor bajada",
+            mayor_bajada["EMPRESA"],
+            delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} € ({mayor_bajada['CAMBIO DÍA %']:.2f}%)"
+        )
+
+        st.markdown("---")
 
         tabla=data[[
         "EMPRESA",
@@ -254,8 +285,9 @@ def mostrar_tabla(data,titulo):
 
         st.dataframe(tabla,use_container_width=True)
 
+
 # =========================
-# BLOQUES
+# BLOQUES GEOGRÁFICOS
 # =========================
 
 acciones = df[df["TIPO"]=="ACCION"]
