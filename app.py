@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import investpy
-from datetime import datetime
+import requests
+import re
 
 st.set_page_config(page_title="Mi Cartera", layout="wide")
-
 st.title("📊 Mi Cartera")
 
 # =========================
@@ -24,37 +23,50 @@ df["PRECIO TOTAL"] = pd.to_numeric(df["PRECIO TOTAL"], errors="coerce").fillna(0
 
 def convertir_ticker(t):
 
-    if t.startswith("BME:"):
-        return t.split(":")[1] + ".MC"
+    if isinstance(t, str):
 
-    if t.startswith("LON:"):
-        return t.split(":")[1] + ".L"
+        if t.startswith("BME:"):
+            return t.split(":")[1] + ".MC"
 
-    if t.startswith("ETR:") or t.startswith("VIE:"):
-        return t.split(":")[1] + ".DE"
+        if t.startswith("LON:"):
+            return t.split(":")[1] + ".L"
 
-    if t.startswith("AMS:"):
-        return t.split(":")[1] + ".AS"
+        if t.startswith("ETR:") or t.startswith("VIE:"):
+            return t.split(":")[1] + ".DE"
 
-    if t.startswith("EPA:"):
-        return t.split(":")[1] + ".PA"
+        if t.startswith("AMS:"):
+            return t.split(":")[1] + ".AS"
 
-    if t.startswith("NYSE:") or t.startswith("NASDAQ:"):
-        return t.split(":")[1]
+        if t.startswith("EPA:"):
+            return t.split(":")[1] + ".PA"
+
+        if t.startswith("NYSE:") or t.startswith("NASDAQ:"):
+            return t.split(":")[1]
 
     return t
 
-
-df["TICKER"] = df["IDENTIFICADOR"].apply(convertir_ticker).str.upper()
+df["TICKER"] = df["IDENTIFICADOR"].apply(convertir_ticker)
 
 # =========================
-# CACHE DATOS
+# CACHE PRECIOS ACCIONES
 # =========================
 
 @st.cache_data(ttl=1800)
 def descargar_precios(tickers):
-    return yf.download(tickers, period="2d", interval="1d", progress=False)
 
+    if len(tickers) == 0:
+        return None
+
+    return yf.download(
+        tickers,
+        period="2d",
+        interval="1d",
+        progress=False
+    )
+
+# =========================
+# CACHE DIVISAS
+# =========================
 
 @st.cache_data(ttl=1800)
 def descargar_divisas():
@@ -66,65 +78,47 @@ def descargar_divisas():
 
     return eurusd, gbpusd
 
-
 eurusd, gbpusd = descargar_divisas()
 
-tickers_acciones = df[df["TIPO"]!="FONDO"]["TICKER"].unique().tolist()
+tickers_acciones = df[df["TIPO"]!="FONDO"]["TICKER"].dropna().unique().tolist()
 
 precios = descargar_precios(tickers_acciones)
 
-close_data = precios["Close"]
+close_data = None
+if precios is not None:
+    close_data = precios["Close"]
 
 # =========================
-# FUNCIÓN NAV FONDOS
+# NAV FONDOS MORNINGSTAR
 # =========================
 
-def obtener_nav_fondo(row):
+def obtener_nav_morningstar(isin):
 
     try:
 
-        isin = row["IDENTIFICADOR"]
-        nombre = row["EMPRESA"]
+        url = f"https://www.morningstar.es/es/funds/snapshot/snapshot.aspx?id={isin}"
 
-        hoy = datetime.today().strftime("%d/%m/%Y")
+        r = requests.get(url, timeout=10)
 
-        # Intentar por ISIN
-        try:
+        texto = r.text
 
-            datos = investpy.get_fund_historical_data(
-                fund=isin,
-                country="luxembourg",
-                from_date="01/01/2024",
-                to_date=hoy
-            )
+        nav = re.search(r'"LastPrice":"([\d\.]+)"', texto)
 
-        except:
+        if nav:
+            return float(nav.group(1))
 
-            # Intentar por nombre
-            datos = investpy.get_fund_historical_data(
-                fund=nombre,
-                country="luxembourg",
-                from_date="01/01/2024",
-                to_date=hoy
-            )
-
-        nav = datos["Close"].iloc[-1]
-        nav_ayer = datos["Close"].iloc[-2]
-
-        return nav, nav_ayer
+        return 0
 
     except:
-
-        return 0,0
-
-
-precio_actual = []
-cambio_dia_eur = []
-cambio_dia_pct = []
+        return 0
 
 # =========================
 # CALCULAR PRECIOS
 # =========================
+
+precio_actual = []
+cambio_dia_eur = []
+cambio_dia_pct = []
 
 for _,row in df.iterrows():
 
@@ -136,8 +130,7 @@ for _,row in df.iterrows():
     p_actual = 0
     p_ayer = 0
 
-    # ---------- ACCIONES / ETF ----------
-
+    # ACCIONES / ETFs
     if tipo != "FONDO":
 
         try:
@@ -148,20 +141,17 @@ for _,row in df.iterrows():
             p_ayer = datos.iloc[-2]
 
         except:
+            pass
 
-            p_actual = 0
-            p_ayer = 0
-
-    # ---------- FONDOS ----------
-
+    # FONDOS
     else:
 
-        nav, nav_ayer = obtener_nav_fondo(row)
+        nav = obtener_nav_morningstar(row["IDENTIFICADOR"])
 
         p_actual = nav
-        p_ayer = nav_ayer
+        p_ayer = nav
 
-    # ---------- DIVISAS ----------
+    # DIVISAS
 
     if divisa == "USD" and p_actual != 0:
 
@@ -170,10 +160,8 @@ for _,row in df.iterrows():
 
     if divisa == "GBP" and p_actual != 0:
 
-        p_actual = (p_actual/100*gbpusd)/eurusd
-        p_ayer = (p_ayer/100*gbpusd)/eurusd
-
-    # ---------- CAMBIO DIARIO ----------
+        p_actual = (p_actual/100 * gbpusd) / eurusd
+        p_ayer = (p_ayer/100 * gbpusd) / eurusd
 
     if p_ayer != 0:
 
@@ -188,7 +176,6 @@ for _,row in df.iterrows():
     precio_actual.append(p_actual)
     cambio_dia_eur.append(cambio_eur)
     cambio_dia_pct.append(cambio_pct)
-
 
 df["PRECIO ACTUAL €"] = precio_actual
 df["CAMBIO DÍA €"] = cambio_dia_eur
@@ -205,7 +192,7 @@ df["RENTABILIDAD %"] = df["DIFERENCIA €"] / df["PRECIO TOTAL"].replace(0,1) * 
 total_inicial = df["PRECIO TOTAL"].sum()
 total_actual = df["VALOR ACTUAL €"].sum()
 
-rentabilidad_total = (total_actual-total_inicial)/total_inicial*100
+rentabilidad_total = (total_actual - total_inicial) / total_inicial * 100
 
 # =========================
 # MOVIMIENTO DIARIO
@@ -214,20 +201,14 @@ rentabilidad_total = (total_actual-total_inicial)/total_inicial*100
 cambio_total_dia = df["CAMBIO DÍA €"].sum()
 
 if cambio_total_dia > 0:
-
     flecha="↑"
     color="green"
-
 elif cambio_total_dia < 0:
-
     flecha="↓"
     color="red"
-
 else:
-
     flecha="→"
     color="gray"
-
 
 st.markdown(
 f"<h3 style='color:{color};'>{flecha} Movimiento Diario: {cambio_total_dia:,.2f} €</h3>",
@@ -261,30 +242,27 @@ def mostrar_tabla(data,titulo):
         col1.metric(
             "🔼 Mayor subida",
             mayor_subida["EMPRESA"],
-            delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} € ({mayor_subida['CAMBIO DÍA %']:.2f}%)"
+            delta=f"{mayor_subida['CAMBIO DÍA €']:,.2f} €"
         )
 
         col2.metric(
             "🔽 Mayor bajada",
             mayor_bajada["EMPRESA"],
-            delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} € ({mayor_bajada['CAMBIO DÍA %']:.2f}%)"
+            delta=f"{mayor_bajada['CAMBIO DÍA €']:,.2f} €"
         )
 
-        st.markdown("---")
-
-        tabla=data[[
-        "EMPRESA",
-        "ACCIONES",
-        "PRECIO TOTAL",
-        "PRECIO ACTUAL €",
-        "CAMBIO DÍA €",
-        "CAMBIO DÍA %",
-        "DIFERENCIA €",
-        "RENTABILIDAD %"
+        tabla = data[[
+            "EMPRESA",
+            "ACCIONES",
+            "PRECIO TOTAL",
+            "PRECIO ACTUAL €",
+            "CAMBIO DÍA €",
+            "CAMBIO DÍA %",
+            "DIFERENCIA €",
+            "RENTABILIDAD %"
         ]]
 
         st.dataframe(tabla,use_container_width=True)
-
 
 # =========================
 # BLOQUES GEOGRÁFICOS
@@ -292,10 +270,10 @@ def mostrar_tabla(data,titulo):
 
 acciones = df[df["TIPO"]=="ACCION"]
 
-esp = acciones[acciones["TICKER"].str.endswith(".MC")]
-uk = acciones[acciones["TICKER"].str.endswith(".L")]
-eur = acciones[acciones["TICKER"].str.endswith((".DE",".AS",".PA"))]
-usa = acciones[~acciones["TICKER"].str.contains(r"\.")]
+esp = acciones[acciones["TICKER"].astype(str).str.endswith(".MC")]
+uk = acciones[acciones["TICKER"].astype(str).str.endswith(".L")]
+eur = acciones[acciones["TICKER"].astype(str).str.endswith((".DE",".AS",".PA"))]
+usa = acciones[~acciones["TICKER"].astype(str).str.contains(r"\.")]
 
 st.header("📈 Acciones")
 
